@@ -1,0 +1,22 @@
+{
+  "A": {
+    "outbound": {"features": [{"properties": {"totalTime": 240, "totalDistance": 280}}]},
+    "inbound":  {"features": [{"properties": {"totalTime": 300, "totalDistance": 300}}]}
+  },
+  "B": {
+    "outbound": {"features": [{"properties": {"totalTime": 240, "totalDistance": 270}}]},
+    "inbound":  {"features": [{"properties": {"totalTime": 300, "totalDistance": 290}}]}
+  },
+  "C": {
+    "outbound": {"features": [{"properties": {"totalTime": 720, "totalDistance": 900}}]},
+    "inbound":  {"features": [{"properties": {"totalTime": 780, "totalDistance": 950}}]}
+  },
+  "D": {
+    "outbound": {"features": [{"properties": {"totalTime": 600, "totalDistance": 750}}]},
+    "inbound":  {"features": [{"properties": {"totalTime": 640, "totalDistance": 780}}]}
+  },
+  "E": {
+    "outbound": {"features": [{"properties": {"totalTime": 120, "totalDistance": 130}}]},
+    "inbound":  {"features": [{"properties": {"totalTime": 130, "totalDistance": 130}}]}
+  }
+}
