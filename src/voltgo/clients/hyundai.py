@@ -60,11 +60,13 @@ def parse_charging_response(raw: dict, source: str = "hyundai",
         remaining_sec = int(round(float(remain["value"]) * UNIT_TO_SEC[unit]))
 
     plug_type = PLUG_TYPE.get(plugin, "none")
+    target_val = float(target) if target is not None else None
 
     return ChargingSnapshot(
         charging=charging,
         soc_pct=float(soc) if soc is not None else None,
-        target_soc_pct=float(target) if target is not None else 80,
+        target_soc_pct=target_val,           # 계산 경로(model_copy)에서 덮어쓸 수 있음
+        reported_target_soc_pct=target_val,  # API 원문 그대로, 이후 안 덮어씀 (2.4/2.5.2)
         capacity_kwh=capacity_kwh if capacity_kwh is not None else DEFAULT_CAPACITY_KWH,
         avg_power_kw=avg_power_kw if avg_power_kw is not None else DEFAULT_POWER_KW[plug_type],
         reported_remaining_sec=remaining_sec,

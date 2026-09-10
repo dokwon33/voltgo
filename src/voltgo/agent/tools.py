@@ -76,13 +76,13 @@ def get_charging_status(runtime: ToolRuntime, force_refresh: bool = False) -> di
 # 2. 시간 예산
 # ---------------------------------------------------------------
 @tool
-def calculate_time_budget(runtime: ToolRuntime, target_soc_pct: float = 80,
+def calculate_time_budget(runtime: ToolRuntime, target_soc_pct: Optional[float] = None,
                           user_limit_min: Optional[int] = None) -> dict:
     """검증된 충전 정보와 사용자의 시간 제한으로 복귀 마감 시각과 지금 남은 가용 시간(초)을 계산합니다.
     get_charging_status 다음에 호출합니다.
 
     Args:
-        target_soc_pct: 목표 충전량(%). 기본 80
+        target_soc_pct: 목표 충전량(%). 사용자가 말한 값. 없으면 차량 설정값을 쓰고, 그것도 없으면 질문합니다.
         user_limit_min: 사용자가 말한 시간 제한(분). "30분 있어" -> 30. 없으면 None
     """
     ctx = runtime.context
@@ -91,6 +91,14 @@ def calculate_time_budget(runtime: ToolRuntime, target_soc_pct: float = 80,
 
     if s.charging is None:
         return tool_error("PRECONDITION_FAILED", "get_charging_status 를 먼저 호출하세요")
+
+    api_target = s.charging.reported_target_soc_pct   # 차량이 실제로 설정한 목표 원문값 (API 미제공이면 None)
+
+    if target_soc_pct is None:
+        if api_target is None:
+            return tool_error("NEED_INPUT", "목표 충전량을 몇 %로 할지 사용자에게 물어보세요.")
+        target_soc_pct = api_target          # 사용자가 말 안 하면 차량 설정 그대로 쓴다
+
     if not (0 < target_soc_pct <= 100):
         return tool_error("NEED_INPUT", "목표 SoC 는 0~100 사이여야 합니다")
     if user_limit_min is not None and user_limit_min <= 0:
@@ -105,7 +113,22 @@ def calculate_time_budget(runtime: ToolRuntime, target_soc_pct: float = 80,
         s.user_limit_min = user_limit_min
         s.limit_said_at = now       # 제한을 말한 시각 기준으로 마감을 잡는다
 
-    snap = s.charging.model_copy(update={"target_soc_pct": target_soc_pct})
+    # 사용자 목표와 차량(API) 목표가 다르면 방향에 따라 다르게 처리한다 (2.5.2, C028)
+    mismatch_warning = None
+    if api_target is not None and target_soc_pct != api_target:
+        if target_soc_pct < api_target:
+            # 충전 경로상 반드시 지나가는 지점 -> 에너지 추정으로 전환 (remainTime 은 api_target 기준이라 못 믿는다)
+            snap = s.charging.model_copy(update={"target_soc_pct": target_soc_pct, "reported_remaining_sec": None})
+            mismatch_warning = (f"차량은 {api_target:.0f}%까지 자동 충전되도록 설정돼있어요. "
+                                f"{target_soc_pct:.0f}% 도달 시각은 추정치입니다.")
+        else:
+            # 차량이 api_target 에서 자동으로 멈춘다 -> 사용자 목표는 도달 불가, API 값 그대로 쓴다
+            snap = s.charging.model_copy(update={"target_soc_pct": api_target})
+            mismatch_warning = (f"차량은 {api_target:.0f}%에서 자동으로 충전이 멈추도록 설정돼있어요. "
+                                f"{target_soc_pct:.0f}%까지 채우려면 차량 앱에서 직접 목표를 올려주세요.")
+    else:
+        snap = s.charging.model_copy(update={"target_soc_pct": target_soc_pct})
+
     # 같은 이름의 도구 함수와 겹치지 않게 모듈 경로로 부른다
     budget, err = time_budget.calculate_time_budget(snap, now, buffer_min=ctx.buffer_min,
                                                     user_limit_min=s.user_limit_min, limit_said_at=s.limit_said_at)
@@ -121,6 +144,8 @@ def calculate_time_budget(runtime: ToolRuntime, target_soc_pct: float = 80,
     s.time_budget = budget
     if budget.estimate_basis == "energy_power":
         s.warnings.append("잔여시간은 배터리 용량·평균 전력 정책값으로 추정한 값입니다")
+    if mismatch_warning:
+        s.warnings.append(mismatch_warning)
 
     return ToolResult(status="ok", data=budget, observed_at=now,
                       message=f"복귀 마감 {budget.return_deadline:%H:%M}, 가용 {budget.available_sec // 60}분").dump()

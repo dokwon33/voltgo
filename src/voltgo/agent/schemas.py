@@ -28,7 +28,8 @@ class ChargingSnapshot(BaseModel):
     """충전 상태 1건. 현대차 원문 필드는 clients/hyundai.py 어댑터에서 여기로 변환한다."""
     charging: Optional[bool] = None
     soc_pct: Optional[float] = None
-    target_soc_pct: float = 80
+    target_soc_pct: Optional[float] = None    # 계산에 실제로 쓸 목표 (API가 안 주면 None, 2.5.2)
+    reported_target_soc_pct: Optional[float] = None  # API 원문 목표값 그대로 보관, 계산 경로에서 덮어쓰지 않음
     capacity_kwh: Optional[float] = None      # API 미제공 -> 정책값/사용자 입력
     avg_power_kw: Optional[float] = None      # API 미제공 -> 정책값/사용자 입력
     reported_remaining_sec: Optional[int] = None  # remainTime 을 초로 변환한 값
