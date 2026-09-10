@@ -24,6 +24,14 @@ class Origin(BaseModel):
     source: Literal["manual", "mock", "unknown"] = "manual"
 
 
+class StationCandidate(Origin):
+    """find_station 검색 후보 (설계서 2.5 ToolResult[list[StationCandidate]]).
+    Origin 을 상속하므로 사용자가 고른 후보를 그대로 session.origin 에 넣는다."""
+    poi_id: str
+    address: str = ""                         # 후보가 여러 개일 때 이름과 같이 보여준다
+    nav_seq: str = ""                         # 같은 POI 의 입구 구분
+
+
 class ChargingSnapshot(BaseModel):
     """충전 상태 1건. 현대차 원문 필드는 clients/hyundai.py 어댑터에서 여기로 변환한다."""
     charging: Optional[bool] = None
@@ -56,6 +64,7 @@ class Place(BaseModel):
     longitude: float
     distance_m: int                           # 출발지에서 직선 거리
     raw_category: str = ""                    # TMAP middleBizName/lowerBizName 원문
+    nav_seq: str = ""                         # 입구 구분 (한 장소에 입구가 여러 개일 때)
     opening_status: Literal["open", "closed", "unknown"] = "unknown"
     poi_source: Literal["tmap", "mock"]
 
