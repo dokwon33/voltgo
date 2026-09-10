@@ -3,7 +3,7 @@
 > **전기차 충전 대기시간 활용 에이전트**
 > 충전이 끝나기 전에 다녀올 수 있는 식사·쇼핑 등 볼일을 골라, 이동 동선과 복귀 시각을 계획해 주는 AI 에이전트
 
-> 🚧 **현재 상태: 설계 단계** — 디렉터리 구조만 잡아둔 상태이며, 구현 코드는 아직 없습니다.
+> 🛠️ **현재 상태: 기본 구현(뼈대) 완료** — Mock 데이터로 `충전 조회 → 시간 예산 → 장소 검색 → 왕복 경로 → 선별 → 승인/확정 → 선호 기억` 전체 흐름이 돌아갑니다. TMAP 은 키를 넣으면 실연동, 현대차는 Mock 이 기본입니다. 설계서는 `설계서/VoltGo_Agent_설계서_완성본.docx`.
 
 ---
 
@@ -102,28 +102,55 @@ flowchart LR
 ```
 voltgo/
 ├── README.md
-├── requirements.txt          # 의존성 (구현 시 채움)
+├── requirements.txt          # 의존성 (버전 고정)
 ├── .env.example              # 환경변수 예시 (API 키 등)
-├── .gitignore
-├── src/
-│   └── voltgo/
-│       ├── clients/          # 외부 API 클라이언트 (현대차, TMAP, Mock)
-│       ├── core/             # 결정적 계산 로직 (남은 시간, 왕복 시간, 선별)
-│       └── agent/            # LLM 에이전트, Tool 정의, 프롬프트
-├── tests/                    # 단계별 독립 pytest
-├── notebooks/                # 탐색/실험 (EDA, API 응답 확인)
+├── pytest.ini                # pythonpath=src
+├── src/voltgo/
+│   ├── clients/              # 외부 API 클라이언트 + Mock
+│   │   ├── hyundai.py        #   현대차 충전 상태 API + 원문 필드 어댑터 (remainTime 단위 변환 등)
+│   │   ├── mock_charging.py  #   data/mock/charging_*.json 을 같은 어댑터로 읽는 Mock 공급자
+│   │   ├── tmap_places.py    #   TMAP 주변 카테고리 검색 / 통합검색 (+ Mock)
+│   │   └── tmap_routes.py    #   TMAP 보행자 경로, 가는 길·오는 길 각각 조회 (+ Mock)
+│   ├── core/                 # 결정적 계산 (순수 함수, API/LLM 모름)
+│   │   ├── time_budget.py    #   잔여시간 → 충전 완료 시각 → 복귀 마감 → 가용시간(초)
+│   │   ├── place_policy.py   #   카테고리 매핑, 체류 기본값, 500m 필터, 중복 제거
+│   │   └── feasibility.py    #   왕복+체류 ≤ 가용시간 판정, 정렬, 승인 뒤 재검증
+│   └── agent/                # LangChain 에이전트
+│       ├── schemas.py        #   Pydantic 데이터 계약 (ToolResult, ModelDecision, VoltGoResponse …)
+│       ├── state.py          #   Runtime Context / Session (Tool 들이 공유하는 상태)
+│       ├── tools.py          #   @tool 9개 (get_charging_status … delete_preferences)
+│       ├── prompts.py        #   System prompt, few-shot
+│       ├── middleware.py     #   입력 검사·선호 주입·호출 한도·도구 정책·출력 검증
+│       ├── approval.py       #   Human-in-the-loop (confirm_plan, save_preferences 승인)
+│       ├── memory.py         #   사용자 선호 JSON 저장 (장기 기억)
+│       ├── assembler.py      #   ModelDecision + Session → VoltGoResponse (숫자는 코드가 채움)
+│       └── agent.py          #   create_agent 조립, ask() / decide()
+├── scripts/demo.py           # CLI 시연 (대화형, 승인 프롬프트 포함)
+├── tests/                    # pytest (계산·선별·어댑터·도구 흐름·출력 조립)
+├── notebooks/                # 탐색/실험
 ├── docs/                     # 설계 문서
 └── data/
     ├── raw/                  # 원본 데이터 (git 제외)
-    └── mock/                 # 시연용 Mock 데이터 (충전 상태 등)
+    ├── mock/                 # 충전/장소/경로 fixture (현대차·TMAP 원문 필드명 그대로)
+    └── prefs/                # 사용자 선호 저장 파일 (git 제외)
 ```
 
 - `notebooks/`는 **탐색**, `src/`는 **검증된 재사용 코드**로 역할을 분리한다.
-- 파이프라인 각 단계는 독립적으로 테스트 가능하도록 분리한다.
+- 파이프라인 각 단계는 독립적으로 테스트 가능하도록 분리한다. (`core/` 는 fixture 만으로 테스트된다)
+
+### 동작 방식 요약
+
+| 단계 | 어디서 | 비고 |
+| --- | --- | --- |
+| 모델 | `agent.py` `init_chat_model(MODEL_NAME)` | 기본 `gpt-4.1-mini`, temperature 0.1, timeout 10s |
+| 도구 순서 | `get_charging_status → calculate_time_budget → search_nearby_places → get_walking_routes → select_feasible_plans` | 순서를 어기면 `PRECONDITION_FAILED` |
+| 구조화 출력 | `ToolStrategy(ModelDecision)` | 모델은 후보 ID·설명만. 시각/상호/소요시간은 `assembler.py` 가 Session 에서 채움 |
+| 승인 | `HumanInTheLoopMiddleware` (`confirm_plan`, `save_preferences`) | `awaiting_approval` 상태로 멈추고, `decide(agent, "approve" / "reject", …)` 로 재개 |
+| 단기 기억 | `InMemorySaver` + `thread_id` | 프로세스 재시작 후 복원은 보장하지 않음 |
+| 장기 기억 | `data/prefs/{user_id}.json` | 명시적 "기억해줘" + 승인 뒤에만 저장 |
+| 한도 | 모델 8회 · Tool 12회 · 외부 API 24회 | `middleware.py` |
 
 ## 8. 실행 방법
-
-> 구현 후 작성 예정
 
 ```bash
 # 1. 가상환경 및 의존성 설치
@@ -131,11 +158,45 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
 # 2. 환경변수 설정
-cp .env.example .env   # API 키 입력
+cp .env.example .env   # OPENAI_API_KEY 는 필수. TMAP_APP_KEY 는 있으면 실연동, 없으면 Mock
 
-# 3. 실행 / 테스트
-# (TBD)
+# 3. 테스트 (LLM 호출 없음, Mock fixture 만 사용)
 pytest
+
+# 4. CLI 시연
+python scripts/demo.py           # 실제 시각
+python scripts/demo.py --fixed   # 14:00 고정 시계 (설계서 C001 조건)
+```
+
+시연 입력 예시
+
+```
+질문: 30분 정도 있는데 간단히 밥 먹고 싶어. 12분이면 먹어.
+질문: 1번으로 확정할게          → [승인 요청] approve / reject
+질문: 카페를 선호해. 다음에도 기억해줘   → [승인 요청] approve / reject
+```
+
+### 실행 모드
+
+| 환경변수 | 값 | 동작 |
+| --- | --- | --- |
+| `USE_MOCK_CHARGING` | `true` (기본) | `data/mock/charging_ok.json` 사용. `MOCK_CHARGING_FIXTURE` 로 `charging_done`, `charging_no_remain` 선택 |
+| `USE_MOCK_CHARGING` | `false` | 현대차 API 실호출. `HYUNDAI_ACCESS_TOKEN`, `HYUNDAI_CAR_ID` 필요 |
+| `TMAP_APP_KEY` | 있음 | 장소·경로 실연동. 출발지는 대화 중 `find_station` 으로 잡는다 |
+| `TMAP_APP_KEY` | 없음 | `places_sample.json`, `routes_sample.json` fixture. 출발지는 fixture 의 충전소 |
+
+현대차 OAuth(브라우저 2회)는 코드에 넣지 않았다. 콘솔에서 프로젝트를 만든 뒤 `authorize → token → 제3자 제공 동의 → carlist` 순서로 토큰과 `carId` 를 받아 `.env` 에 넣는다. (`설계서/API규격_검토_asis_tobe.md` §5)
+
+코드로 직접 부를 때:
+
+```python
+from voltgo.agent.agent import build_agent, ask, decide
+
+agent = build_agent()
+res = ask(agent, "30분 안에 밥 먹고 싶어", context, thread_id="t1")   # context 는 scripts/demo.py 의 make_context 참고
+if res.status == "awaiting_approval":
+    res = decide(agent, "approve", context, thread_id="t1")
+print(res.status, res.message)
 ```
 
 ## 9. 데이터 출처
@@ -148,10 +209,10 @@ pytest
 
 ## 10. 로드맵
 
-- [ ] 설계: 요구사항 정리, 에이전트 Tool 스펙 정의
+- [x] 설계: 요구사항 정리, 에이전트 Tool 스펙 정의
 - [ ] TMAP API 키 발급 및 응답 탐색 (`notebooks/`)
-- [ ] 현대차 API 접근 확인 / Mock 데이터 구성
-- [ ] `core/` 시간 계산 로직 구현 + 테스트
-- [ ] `clients/` API 클라이언트 구현 + 테스트
-- [ ] `agent/` LLM 에이전트 연결
+- [x] Mock 데이터 구성 (현대차 API 접근 확인은 진행 중)
+- [x] `core/` 시간 계산 로직 구현 + 테스트
+- [x] `clients/` API 클라이언트 구현 + Mock 테스트 (TMAP 실호출 확인은 진행 중)
+- [x] `agent/` LLM 에이전트 연결 (도구·구조화 출력·HITL·미들웨어)
 - [ ] 시연 시나리오 구성

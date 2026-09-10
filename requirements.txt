@@ -1,1 +1,8 @@
-# 구현 단계에서 채울 예정
+# 실습(노트북 [4],[5]) 과 같은 계열. 버전은 2026-09-10 설치 기준으로 고정
+langchain==1.4.0
+langchain-openai==1.6.2
+langgraph==1.2.11
+pydantic==2.13.5
+python-dotenv==1.2.3
+requests==2.34.2
+pytest==9.1.1

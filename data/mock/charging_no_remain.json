@@ -1,0 +1,8 @@
+{
+  "batteryPlugin": 1,
+  "batteryCharge": true,
+  "soc": 40,
+  "targetSOC": {"plugType": 0, "targetSOClevel": 80},
+  "timestamp": "20260910140000",
+  "msgId": "mock-charging-no-remain"
+}

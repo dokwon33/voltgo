@@ -18,3 +18,7 @@ data/raw/*
 .DS_Store
 .vscode/
 .idea/
+
+# 사용자 선호 저장 파일 (개인 데이터)
+data/prefs/*
+!data/prefs/.gitkeep

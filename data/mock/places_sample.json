@@ -1,0 +1,25 @@
+{
+  "station": {"name": "역삼역 EV충전소", "lat": 37.5006, "lon": 127.0366},
+  "searchPoiInfo": {
+    "totalCount": "5", "count": "5", "page": "1",
+    "pois": {
+      "poi": [
+        {"id": "A", "pkey": "1001", "navSeq": "1", "name": "김밥천국 역삼점",
+         "frontLat": "37.50200", "frontLon": "127.03800", "noorLat": "37.50201", "noorLon": "127.03801",
+         "upperBizName": "식음료", "middleBizName": "음식", "lowerBizName": "한식", "radius": "0.2"},
+        {"id": "B", "pkey": "1002", "navSeq": "1", "name": "역삼 국수집",
+         "frontLat": "37.49900", "frontLon": "127.03450", "noorLat": "37.49901", "noorLon": "127.03451",
+         "upperBizName": "식음료", "middleBizName": "음식", "lowerBizName": "한식", "radius": "0.25"},
+        {"id": "C", "pkey": "1003", "navSeq": "1", "name": "본죽 테헤란로점",
+         "frontLat": "37.50400", "frontLon": "127.03950", "noorLat": "37.50401", "noorLon": "127.03951",
+         "upperBizName": "식음료", "middleBizName": "음식", "lowerBizName": "한식", "radius": "0.45"},
+        {"id": "D", "pkey": "1004", "navSeq": "1", "name": "스타벅스 역삼대로점",
+         "frontLat": "37.50600", "frontLon": "127.04100", "noorLat": "37.50601", "noorLon": "127.04101",
+         "upperBizName": "생활", "middleBizName": "카페", "lowerBizName": "커피", "radius": "0.7"},
+        {"id": "E", "pkey": "1005", "navSeq": "1", "name": "GS25 역삼중앙점",
+         "frontLat": "37.50120", "frontLon": "127.03720", "noorLat": "37.50121", "noorLon": "127.03721",
+         "upperBizName": "생활", "middleBizName": "편의점", "lowerBizName": "편의점", "radius": "0.09"}
+      ]
+    }
+  }
+}
