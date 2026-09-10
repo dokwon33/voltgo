@@ -3,7 +3,19 @@
 > **전기차 충전 대기시간 활용 에이전트**
 > 충전이 끝나기 전에 다녀올 수 있는 식사·쇼핑 등 볼일을 골라, 이동 동선과 복귀 시각을 계획해 주는 AI 에이전트
 
-> 🛠️ **현재 상태: 기본 구현(뼈대) 완료** — Mock 데이터로 `충전 조회 → 시간 예산 → 장소 검색 → 왕복 경로 → 선별 → 승인/확정 → 선호 기억` 전체 흐름이 돌아갑니다. TMAP 은 키를 넣으면 실연동, 현대차는 Mock 이 기본입니다. 설계서는 `설계서/VoltGo_Agent_설계서_완성본.docx`.
+> 🛠️ **현재 상태: 기본 구현 완료 + 파트별 실연동 진행 중** — Mock 데이터로 `충전 조회 → 시간 예산 → 장소 검색 → 왕복 경로 → 선별 → 승인/확정 → 선호 기억` 전체 흐름이 돌아갑니다. TMAP 장소 검색·보행 경로는 실호출 확인 완료, 현대차는 Mock 이 기본입니다.
+> 설계서: [`docs/최종_VoltGo_Agent_설계서.docx`](docs/최종_VoltGo_Agent_설계서.docx), 발표본: [`docs/6반_4조.pdf`](docs/6반_4조.pdf)
+
+## 팀 역할
+
+| 담당 | 이름 | 역할 | 주요 도구 / 산출물 |
+| --- | --- | --- | --- |
+| A | 김보석 | 에이전트 조립·통합 | schemas 동결, 도구 스텁으로 루프 완성, pytest 하네스, 통합 리드 |
+| B | 조영우 | 현대차 API | OAuth·충전 상태 실호출 (안 되면 Mock) · `get_charging_status`, `calculate_time_budget` |
+| C | 이도권 | TMAP 장소 | 주변검색·통합검색, 카테고리 매핑·500m 필터 · `search_nearby_places`, `find_station` |
+| D | 김주은 | TMAP 경로 + 판정 | 보행 경로 왕복 · `get_walking_routes`, `select_feasible_plans` |
+| E | 장인우 | 승인·기억·미들웨어 | HITL 재개·Store·미들웨어 · `confirm_plan`, `save/delete_preferences`, 발표 슬라이드 |
+| F | 김선주 | 문서·품질·발표 | 설계서 최종본·README·데모 문안·발표 취합·테스트 실행·제출 zip |
 
 ---
 
@@ -109,6 +121,7 @@ voltgo/
 │   ├── clients/              # 외부 API 클라이언트 + Mock
 │   │   ├── hyundai.py        #   현대차 충전 상태 API + 원문 필드 어댑터 (remainTime 단위 변환 등)
 │   │   ├── mock_charging.py  #   data/mock/charging_*.json 을 같은 어댑터로 읽는 Mock 공급자
+│   │   ├── tmap_base.py      #   TMAP 공통 HTTP (appKey 헤더, version=1, 오류 코드 변환) — 장소·경로 공용
 │   │   ├── tmap_places.py    #   TMAP 주변 카테고리 검색 / 통합검색 (+ Mock)
 │   │   └── tmap_routes.py    #   TMAP 보행자 경로, 가는 길·오는 길 각각 조회 (+ Mock)
 │   ├── core/                 # 결정적 계산 (순수 함수, API/LLM 모름)
@@ -125,10 +138,13 @@ voltgo/
 │       ├── memory.py         #   사용자 선호 JSON 저장 (장기 기억)
 │       ├── assembler.py      #   ModelDecision + Session → VoltGoResponse (숫자는 코드가 채움)
 │       └── agent.py          #   create_agent 조립, ask() / decide()
-├── scripts/demo.py           # CLI 시연 (대화형, 승인 프롬프트 포함)
+├── scripts/
+│   ├── demo.py               # CLI 시연 (대화형, 승인 프롬프트 포함)
+│   └── probe_tmap_places.py  # TMAP 장소 API 실호출 확인 (원문은 data/raw/tmap/)
 ├── tests/                    # pytest (계산·선별·어댑터·도구 흐름·출력 조립)
 ├── notebooks/                # 탐색/실험
-├── docs/                     # 설계 문서
+├── docs/                     # 설계서·발표본
+│   └── tasks/                # 파트별 작업 정리 (C-tmap-places.md …)
 └── data/
     ├── raw/                  # 원본 데이터 (git 제외)
     ├── mock/                 # 충전/장소/경로 fixture (현대차·TMAP 원문 필드명 그대로)
@@ -143,7 +159,7 @@ voltgo/
 | 단계 | 어디서 | 비고 |
 | --- | --- | --- |
 | 모델 | `agent.py` `init_chat_model(MODEL_NAME)` | 기본 `gpt-4.1-mini`, temperature 0.1, timeout 10s |
-| 도구 순서 | `get_charging_status → calculate_time_budget → search_nearby_places → get_walking_routes → select_feasible_plans` | 순서를 어기면 `PRECONDITION_FAILED` |
+| 도구 순서 | `(find_station) → get_charging_status → calculate_time_budget → search_nearby_places → get_walking_routes → select_feasible_plans` | 순서를 어기면 `PRECONDITION_FAILED`. 출발지가 없으면 `find_station` 먼저 |
 | 구조화 출력 | `ToolStrategy(ModelDecision)` | 모델은 후보 ID·설명만. 시각/상호/소요시간은 `assembler.py` 가 Session 에서 채움 |
 | 승인 | `HumanInTheLoopMiddleware` (`confirm_plan`, `save_preferences`) | `awaiting_approval` 상태로 멈추고, `decide(agent, "approve" / "reject", …)` 로 재개 |
 | 단기 기억 | `InMemorySaver` + `thread_id` | 프로세스 재시작 후 복원은 보장하지 않음 |
@@ -182,10 +198,25 @@ python scripts/demo.py --fixed   # 14:00 고정 시계 (설계서 C001 조건)
 | --- | --- | --- |
 | `USE_MOCK_CHARGING` | `true` (기본) | `data/mock/charging_ok.json` 사용. `MOCK_CHARGING_FIXTURE` 로 `charging_done`, `charging_no_remain` 선택 |
 | `USE_MOCK_CHARGING` | `false` | 현대차 API 실호출. `HYUNDAI_ACCESS_TOKEN`, `HYUNDAI_CAR_ID` 필요 |
-| `TMAP_APP_KEY` | 있음 | 장소·경로 실연동. 출발지는 대화 중 `find_station` 으로 잡는다 |
-| `TMAP_APP_KEY` | 없음 | `places_sample.json`, `routes_sample.json` fixture. 출발지는 fixture 의 충전소 |
+| `TMAP_APP_KEY` | 있음 | 장소·경로 실연동. 출발지는 대화 중 `find_station` 으로 잡는다 (후보가 여러 개면 사용자가 선택) |
+| `TMAP_APP_KEY` | 없음 | `places_sample.json`, `stations_sample.json`, `routes_sample.json` fixture. 출발지는 fixture 의 첫 충전소 |
 
-현대차 OAuth(브라우저 2회)는 코드에 넣지 않았다. 콘솔에서 프로젝트를 만든 뒤 `authorize → token → 제3자 제공 동의 → carlist` 순서로 토큰과 `carId` 를 받아 `.env` 에 넣는다. (`설계서/API규격_검토_asis_tobe.md` §5)
+현대차 OAuth(브라우저 2회)는 코드에 넣지 않았다. 콘솔에서 프로젝트를 만든 뒤 `authorize → token → 제3자 제공 동의 → carlist` 순서로 토큰과 `carId` 를 받아 `.env` 에 넣는다. (설계서 2.5.2)
+
+### TMAP 실호출 확인
+
+```bash
+python scripts/probe_tmap_places.py "역삼역 전기차충전소"   # 호출 5회, 원문은 data/raw/tmap/ (git 제외)
+```
+
+| 확인 항목 (2026-09-10, 역삼역 기준) | 결과 |
+| --- | --- |
+| 인증 | `appKey` 헤더. 키가 잘못되면 `403 INVALID_API_KEY` → 키 값·TMAP 상품 사용 신청 확인 |
+| 주변검색 `radius` | km 정수 → `radius=1` 로 받고 코드에서 500m 필터. 카테고리마다 500m 안에 5곳 이상 확보 |
+| 식사 카테고리 | `meal=음식` 으로 식당 검색 확인 |
+| 업종 필드 | 주변검색 응답에는 없음 (통합검색에만 있음) → `raw_category` 는 보통 빈 값 |
+| 주차장 복제 항목 | 같은 id 로 `OO 주차장` 이 섞여 옴 → 본 장소만 남기고 제외 |
+| 보행자 경로 | `features[0].properties.totalTime`(초), `totalDistance`(m) 정수 |
 
 코드로 직접 부를 때:
 
@@ -210,9 +241,12 @@ print(res.status, res.message)
 ## 10. 로드맵
 
 - [x] 설계: 요구사항 정리, 에이전트 Tool 스펙 정의
-- [ ] TMAP API 키 발급 및 응답 탐색 (`notebooks/`)
+- [x] TMAP API 키 발급 및 응답 탐색 (`scripts/probe_tmap_places.py`)
 - [x] Mock 데이터 구성 (현대차 API 접근 확인은 진행 중)
 - [x] `core/` 시간 계산 로직 구현 + 테스트
-- [x] `clients/` API 클라이언트 구현 + Mock 테스트 (TMAP 실호출 확인은 진행 중)
+- [x] `clients/` API 클라이언트 구현 + Mock 테스트
+- [x] TMAP 장소 실호출 확인·반영 (주차장 중복 제거, 충전소 후보 선택) — C
+- [ ] TMAP 보행 경로 실호출 반영 (`tmap_base` 공용 클라이언트 전환) — D
+- [ ] 현대차 충전 상태 실호출 — B
 - [x] `agent/` LLM 에이전트 연결 (도구·구조화 출력·HITL·미들웨어)
 - [ ] 시연 시나리오 구성
