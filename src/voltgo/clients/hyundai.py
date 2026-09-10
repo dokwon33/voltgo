@@ -62,6 +62,9 @@ def parse_charging_response(raw: dict, source: str = "hyundai",
 
     plug_type = PLUG_TYPE.get(plugin, "none")
     target_val = float(target) if target is not None else None
+    # 값을 호출자가 직접 줬으면 manual, 아니면 정책값(실제 출처 모름)이라 unknown
+    capacity_source = "manual" if capacity_kwh is not None else "unknown"
+    avg_power_source = "manual" if avg_power_kw is not None else "unknown"
 
     return ChargingSnapshot(
         charging=charging,
@@ -69,7 +72,9 @@ def parse_charging_response(raw: dict, source: str = "hyundai",
         target_soc_pct=target_val,           # 계산 경로(model_copy)에서 덮어쓸 수 있음
         reported_target_soc_pct=target_val,  # API 원문 그대로, 이후 안 덮어씀 (2.4/2.5.2)
         capacity_kwh=capacity_kwh if capacity_kwh is not None else DEFAULT_CAPACITY_KWH,
+        capacity_source=capacity_source,
         avg_power_kw=avg_power_kw if avg_power_kw is not None else DEFAULT_POWER_KW[plug_type],
+        avg_power_source=avg_power_source,
         reported_remaining_sec=remaining_sec,
         plug_type=plug_type,
         observed_at=parse_timestamp(raw["timestamp"]),

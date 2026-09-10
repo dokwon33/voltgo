@@ -31,7 +31,9 @@ class ChargingSnapshot(BaseModel):
     target_soc_pct: Optional[float] = None    # 계산에 실제로 쓸 목표 (API가 안 주면 None, 2.5.2)
     reported_target_soc_pct: Optional[float] = None  # API 원문 목표값 그대로 보관, 계산 경로에서 덮어쓰지 않음
     capacity_kwh: Optional[float] = None      # API 미제공 -> 정책값/사용자 입력
+    capacity_source: Literal["manual", "mock", "unknown"] = "unknown"  # 값의 출처, source(전체 스냅샷)와 별개
     avg_power_kw: Optional[float] = None      # API 미제공 -> 정책값/사용자 입력
+    avg_power_source: Literal["manual", "mock", "unknown"] = "unknown"  # 값의 출처, source(전체 스냅샷)와 별개
     reported_remaining_sec: Optional[int] = None  # remainTime 을 초로 변환한 값
     plug_type: Literal["fast", "slow", "none"] = "none"
     observed_at: datetime                     # 차량이 보낸 시각 (timestamp)
