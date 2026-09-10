@@ -47,9 +47,10 @@ def get_charging_status(runtime: ToolRuntime, force_refresh: bool = False) -> di
     s = ctx.session
     now = ctx.clock()
 
-    # 60초 안이면 캐시 재사용
+    # 60초 안이면 캐시 재사용 (fetched_at 기준, 차량 전송 지연과 무관하게 우리가 조회한 시점으로 판단)
     if s.charging and not force_refresh:
-        age = (now - s.charging.observed_at).total_seconds()
+        freshness_ref = s.charging.fetched_at or s.charging.observed_at
+        age = (now - freshness_ref).total_seconds()
         if age <= STALE_AFTER_SEC:
             return ToolResult(status="ok", data=s.charging, source=s.charging.source,
                               observed_at=s.charging.observed_at, message="캐시(60초 이내)").dump()

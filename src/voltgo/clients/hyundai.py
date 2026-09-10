@@ -37,7 +37,8 @@ def parse_timestamp(value: str) -> datetime:
 
 def parse_charging_response(raw: dict, source: str = "hyundai",
                             capacity_kwh: Optional[float] = None,
-                            avg_power_kw: Optional[float] = None) -> ChargingSnapshot:
+                            avg_power_kw: Optional[float] = None,
+                            fetched_at: Optional[datetime] = None) -> ChargingSnapshot:
     """
     현대차 원문 필드 -> ChargingSnapshot 어댑터 (API규격_검토 §1.1)
     Mock 도 원문 필드명을 그대로 쓰기 때문에 같은 함수를 쓴다.
@@ -72,6 +73,7 @@ def parse_charging_response(raw: dict, source: str = "hyundai",
         reported_remaining_sec=remaining_sec,
         plug_type=plug_type,
         observed_at=parse_timestamp(raw["timestamp"]),
+        fetched_at=fetched_at,
         source=source,
     )
 
@@ -108,4 +110,4 @@ class HyundaiClient:
         return body
 
     def get_charging_status(self) -> ChargingSnapshot:
-        return parse_charging_response(self.fetch_raw(), source="hyundai")
+        return parse_charging_response(self.fetch_raw(), source="hyundai", fetched_at=datetime.now(KST))

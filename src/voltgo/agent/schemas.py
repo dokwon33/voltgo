@@ -35,6 +35,7 @@ class ChargingSnapshot(BaseModel):
     reported_remaining_sec: Optional[int] = None  # remainTime 을 초로 변환한 값
     plug_type: Literal["fast", "slow", "none"] = "none"
     observed_at: datetime                     # 차량이 보낸 시각 (timestamp)
+    fetched_at: Optional[datetime] = None     # 우리가 실제로 조회한 시각 (관측시각과 구분, 2.5.2)
     source: Literal["hyundai", "manual", "mock"]
 
 
