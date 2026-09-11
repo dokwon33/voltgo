@@ -4,7 +4,7 @@ VoltGo CLI 시연 (노트북 [4] 1-4 '대화형 질의' 패턴)
   python scripts/demo.py             # 실제 시각. 충전은 Mock, TMAP 은 키 있으면 실연동
   python scripts/demo.py --fixed     # 2026-09-10 14:00 고정 시계 (설계서 C001 조건)
 
-승인이 필요한 단계(계획 확정 / 선호 저장)에서는 approve / reject 를 물어본다.
+승인이 필요한 단계(선호 저장)에서는 approve / reject 를 물어본다. 계획 확정은 승인 없이 재검증 후 바로 기록된다.
 """
 import os
 import sys

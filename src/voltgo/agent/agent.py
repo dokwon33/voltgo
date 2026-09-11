@@ -48,8 +48,9 @@ def build_agent(model=None, checkpointer=None):
             preference_prompt,      # wrap_model_call
             model_budget,           # wrap_model_call
             tool_policy,            # wrap_tool_call
-            mark_approval_requested,  # after_model - 승인 요청 시각 기록 (HITL 보다 먼저)
-            approval_middleware(),  # after_model (HITL)
+            approval_middleware(),  # after_model (HITL) - save_preferences 만 interrupt
+            mark_approval_requested,  # after_model - 승인 요청 시각 기록.
+                                      #   after_model 은 등록 역순으로 실행되므로 HITL 뒤에 둬야 interrupt 전에 돈다
             output_integrity,       # after_agent
         ],
         checkpointer=checkpointer or InMemorySaver(),   # 단기 메모리 (thread_id 별)
@@ -88,9 +89,17 @@ def decide(agent, decision, context: Context, thread_id: str, reason: str = "") 
         return error_response(context, "DECISION_COUNT_MISMATCH",
                               f"대기 중인 요청은 {len(pending)}개인데 결정은 {len(decision)}개입니다.")
     try:
-        result = agent.invoke(resume_command(decision, reason, count=len(pending)), config, context=context)
+        command = resume_command(decision, reason, count=len(pending))
+    except ValueError:
+        return error_response(context, "INVALID_DECISION", "approve 또는 reject로 응답해 주세요.")
+    try:
+        result = agent.invoke(command, config, context=context)
     except RuntimeError as e:
         if str(e) == "MODEL_BUDGET_EXCEEDED":
             return error_response(context, "LIMIT_EXCEEDED", "모델 호출 한도(8회)에 도달해 중단했습니다.")
         raise
+    finally:
+        # 묶음 내 도구가 모두 끝난 뒤 정리한다. 재개 중 새 승인 요청이 생기면 유지한다.
+        if not pending_approvals(agent, config):
+            context.session.approval_requested_at = None
     return assemble(result, context)

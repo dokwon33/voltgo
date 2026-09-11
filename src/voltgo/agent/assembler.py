@@ -96,17 +96,11 @@ def assemble(result: dict, context: Context) -> VoltGoResponse:
     if result.get("__interrupt__"):
         req = result["__interrupt__"][0].value
         action = (req.get("action_requests") or [{}])[0]
-        name = action.get("name", "")
-        args = action.get("args", {})
-        if name == "confirm_plan":
-            plan = s.candidates.get(args.get("plan_id"))
-            what = f"'{plan.name}' 계획을 확정할까요?" if plan else "계획을 확정할까요?"
-            cands = [plan] if plan else []
-        else:
-            what = f"선호를 저장할까요? ({args})"
-            cands = []
+        # 승인 대상은 save_preferences 뿐 (계획 확정은 승인 없이 도구가 재검증). 문구는 HITL description 을 쓴다
+        what = action.get("description") or f"선호를 저장할까요? ({action.get('args', {})})"
+        cands = []
         others = (req.get("action_requests") or [])[1:]
-        if others:   # 확정과 저장이 함께 제안된 경우, 두 번째 이후 요청도 보여준다
+        if others:   # 승인 대상이 둘 이상이면 두 번째 이후 요청도 보여준다
             what += " 그리고 " + " / ".join(o.get("description") or o.get("name", "") for o in others)
         msg = render_message(context, cands, what + " (approve / reject)", "awaiting_approval")
         return VoltGoResponse(status="awaiting_approval", message=msg, candidates=cands,

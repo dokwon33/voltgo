@@ -43,7 +43,7 @@ class Session:
     # 확정 / 멱등
     confirmed: Optional[ConfirmedPlan] = None
     confirmed_by_request: dict[str, ConfirmedPlan] = field(default_factory=dict)
-    # 승인 요청을 사용자에게 보여준 시각. 후보를 만든 시각(evaluated_at)과 다르다.
+    # 승인 화면(save_preferences)을 사용자에게 보여준 시각. 후보를 만든 시각(evaluated_at)과 다르다.
     approval_requested_at: Optional[datetime] = None
 
     # 한도/기록
