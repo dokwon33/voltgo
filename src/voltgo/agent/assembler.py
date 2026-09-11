@@ -105,6 +105,9 @@ def assemble(result: dict, context: Context) -> VoltGoResponse:
         else:
             what = f"선호를 저장할까요? ({args})"
             cands = []
+        others = (req.get("action_requests") or [])[1:]
+        if others:   # 확정과 저장이 함께 제안된 경우, 두 번째 이후 요청도 보여준다
+            what += " 그리고 " + " / ".join(o.get("description") or o.get("name", "") for o in others)
         msg = render_message(context, cands, what + " (approve / reject)", "awaiting_approval")
         return VoltGoResponse(status="awaiting_approval", message=msg, candidates=cands,
                               warnings=collect_warnings(context), **base)

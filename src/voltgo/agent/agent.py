@@ -11,7 +11,7 @@ from langchain.agents.structured_output import ToolStrategy
 from langchain.chat_models import init_chat_model
 from langgraph.checkpoint.memory import InMemorySaver
 
-from voltgo.agent.approval import approval_middleware, mark_approval_requested, resume_command
+from voltgo.agent.approval import approval_middleware, mark_approval_requested, pending_approvals, resume_command
 from voltgo.agent.assembler import assemble, error_response
 from voltgo.agent.middleware import (
     input_validation, model_budget, output_integrity, preference_prompt, tool_policy,
@@ -74,7 +74,23 @@ def ask(agent, text: str, context: Context, thread_id: str) -> VoltGoResponse:
     return assemble(result, context)
 
 
-def decide(agent, decision: str, context: Context, thread_id: str, reason: str = "") -> VoltGoResponse:
-    """승인 대기 중인 thread 를 approve / reject 로 재개"""
-    result = agent.invoke(resume_command(decision, reason), _config(thread_id), context=context)
+def decide(agent, decision, context: Context, thread_id: str, reason: str = "") -> VoltGoResponse:
+    """승인 대기 중인 thread 를 approve / reject 로 재개.
+
+    decision 은 "approve"/"reject" 하나(대기 중인 모든 요청에 같은 결정) 또는
+    요청 순서대로 나열한 리스트. 대기 요청 개수는 checkpoint 에서 읽어 맞춘다.
+    """
+    config = _config(thread_id)
+    pending = pending_approvals(agent, config)
+    if not pending:
+        return error_response(context, "NO_PENDING_APPROVAL", "승인을 기다리는 요청이 없습니다.")
+    if isinstance(decision, (list, tuple)) and len(decision) != len(pending):
+        return error_response(context, "DECISION_COUNT_MISMATCH",
+                              f"대기 중인 요청은 {len(pending)}개인데 결정은 {len(decision)}개입니다.")
+    try:
+        result = agent.invoke(resume_command(decision, reason, count=len(pending)), config, context=context)
+    except RuntimeError as e:
+        if str(e) == "MODEL_BUDGET_EXCEEDED":
+            return error_response(context, "LIMIT_EXCEEDED", "모델 호출 한도(8회)에 도달해 중단했습니다.")
+        raise
     return assemble(result, context)
