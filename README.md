@@ -228,9 +228,11 @@ from voltgo.agent.agent import build_agent, ask, decide
 agent = build_agent()
 res = ask(agent, "30분 안에 밥 먹고 싶어", context, thread_id="t1")   # context 는 scripts/demo.py 의 make_context 참고
 if res.status == "awaiting_approval":
-    res = decide(agent, "approve", context, thread_id="t1")
+    res = decide(agent, "approve", context, thread_id="t1", request_id=res.request_id)
 print(res.status, res.message)
 ```
+
+승인 재전송 계약과 Session 사용법은 [A 작업 문서](docs/tasks/A-request-idempotency.md)를 참고하세요.
 
 ## 9. 데이터 출처
 

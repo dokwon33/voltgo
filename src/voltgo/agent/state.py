@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Optional
 
 from voltgo.agent.schemas import (
-    CandidatePlan, ChargingSnapshot, ConfirmedPlan, Origin, Place, RoundTrip, StationCandidate, TimeBudget,
+    CandidatePlan, ChargingSnapshot, ConfirmedPlan, Origin, Place, RoundTrip, StationCandidate, TimeBudget, VoltGoResponse,
 )
 
 # KST는 UTC+9  (노트북 [4] get_current_time 과 동일)
@@ -19,6 +19,17 @@ KST = timezone(timedelta(hours=9))
 
 def now_kst() -> datetime:
     return datetime.now(KST)
+
+
+@dataclass
+class ApprovalRequest:
+    """발급 당시 승인 대상과 재전송 결과. LLM 입력이나 장기 선호에 저장하지 않는다."""
+    payload: str
+    interrupt_ids: tuple[str, ...]
+    action_count: int
+    requested_at: datetime
+    decision_payload: Optional[str] = None
+    response: Optional[VoltGoResponse] = None
 
 
 @dataclass
@@ -38,13 +49,18 @@ class Session:
     user_limit_min: Optional[int] = None
     limit_said_at: Optional[datetime] = None
     dwell_overrides: dict[str, int] = field(default_factory=dict)
-    condition_version: int = 1          # 조건이 바뀌면 +1, 이전 후보/승인은 무효
+    condition_version: int = 1          # 계획 조건이 바뀌면 +1, 이전 후보/확정은 무효
 
     # 확정 / 멱등
     confirmed: Optional[ConfirmedPlan] = None
-    confirmed_by_request: dict[str, ConfirmedPlan] = field(default_factory=dict)
-    # 승인 화면(save_preferences)을 사용자에게 보여준 시각. 후보를 만든 시각(evaluated_at)과 다르다.
+    confirmed_by_plan: dict[str, ConfirmedPlan] = field(default_factory=dict)
+    # 선호 저장 승인 요청을 사용자에게 보여준 시각. 후보를 만든 시각(evaluated_at)과 다르다.
     approval_requested_at: Optional[datetime] = None
+
+    # 실행 래퍼가 관리하는 승인 요청. 조건 변경 후에도 완료 응답은 재전송에 사용한다.
+    request_owner: Optional[tuple[str, str]] = None
+    pending_request_id: Optional[str] = None
+    approval_requests: dict[str, ApprovalRequest] = field(default_factory=dict)
 
     # 한도/기록
     counters: dict[str, int] = field(default_factory=lambda: {"model": 0, "tool": 0, "api": 0})
@@ -55,12 +71,12 @@ class Session:
         self.counters = {"model": 0, "tool": 0, "api": 0}
 
     def bump_version(self):
-        # 조건 변경 -> 새 버전. 이전 후보와 승인은 버린다 (설계서 C013)
+        # 계획 조건 변경 -> 새 버전. 이전 후보와 확정은 버린다 (설계서 C013)
         self.condition_version += 1
         self.candidates = {}
         self.confirmed = None
-        self.confirmed_by_request = {}   # 옛 버전의 확정 기록도 같이 버린다
-        self.approval_requested_at = None
+        self.confirmed_by_plan = {}   # 옛 버전의 확정 기록도 같이 버린다
+        # 선호 저장 승인은 계획 조건과 독립적이다. 시각은 요청 완료 때 실행 래퍼가 정리한다.
 
 
 @dataclass

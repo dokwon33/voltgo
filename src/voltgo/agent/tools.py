@@ -262,7 +262,11 @@ def search_nearby_places(runtime: ToolRuntime, category: Category, radius_km: in
 
     picked = filter_places(places, s.origin, max_dist_m=max_dist_m, limit=MAX_ROUTE_CANDIDATES)
 
-    # 새로 검색하면 이전 경로/후보는 의미가 없다
+    # 정상 빈 결과를 포함한 새 검색은 이전 후보와 확정도 무효화한다.
+    if s.candidates or s.confirmed or s.confirmed_by_plan:
+        s.bump_version()
+    s.confirmed = None
+    s.confirmed_by_plan = {}
     s.places = {p.poi_id: p for p in picked}
     s.routes = {}
     s.candidates = {}
@@ -304,11 +308,11 @@ def get_walking_routes(runtime: ToolRuntime, poi_ids: list[str]) -> dict:
         return tool_error("PRECONDITION_FAILED", "경로를 조회할 poi_id가 없습니다")
 
     # 경로가 갱신되면 이전 경로로 만든 후보와 확정은 더 이상 유효하지 않다.
-    if s.candidates or s.confirmed or s.confirmed_by_request:
+    if s.candidates or s.confirmed or s.confirmed_by_plan:
         s.bump_version()
     s.candidates = {}
     s.confirmed = None
-    s.confirmed_by_request = {}
+    s.confirmed_by_plan = {}
     s.selected_ran = False
 
     # 같은 ID를 중복 호출하지 않고, 이번 조회 결과만 다음 판정에 사용한다.
@@ -374,7 +378,7 @@ def select_feasible_plans(runtime: ToolRuntime, dwell_min: Optional[int] = None,
     if bad:
         return tool_error("PRECONDITION_FAILED", f"잘못된 dwell_overrides: {bad}")
 
-    # 체류 조건이 바뀌면 새 버전 (이전 승인 무효)
+    # 체류 조건이 바뀌면 새 버전 (이전 후보·확정 무효, 선호 승인은 별도)
     if overrides != s.dwell_overrides and (s.candidates or s.confirmed):
         s.bump_version()
     s.dwell_overrides = overrides
@@ -414,10 +418,10 @@ def confirm_plan(runtime: ToolRuntime, plan_id: str, version: int) -> dict:
     s = ctx.session
     now = ctx.clock()
 
-    # 같은 요청은 한 번만 (멱등, C017)
+    # 같은 계획의 중복 확정 방지. 선호 승인 request_id 재전송은 실행 래퍼에서 처리한다.
     key = f"{plan_id}:{version}"
-    if key in s.confirmed_by_request:
-        return ToolResult(status="ok", data=s.confirmed_by_request[key], message="이미 확정된 계획").dump()
+    if key in s.confirmed_by_plan:
+        return ToolResult(status="ok", data=s.confirmed_by_plan[key], message="이미 확정된 계획").dump()
 
     plan = s.candidates.get(plan_id)
     if plan is None:
@@ -448,7 +452,7 @@ def confirm_plan(runtime: ToolRuntime, plan_id: str, version: int) -> dict:
     confirmed = ConfirmedPlan(plan_id=plan_id, version=version, confirmed_at=now,
                               return_at=rechecked.return_at, leave_by=rechecked.leave_by)
     s.confirmed = confirmed
-    s.confirmed_by_request[key] = confirmed
+    s.confirmed_by_plan[key] = confirmed
     s.candidates[plan_id] = rechecked
     return ToolResult(status="ok", data=confirmed, observed_at=now,
                       message=f"확정. 늦어도 {confirmed.leave_by:%H:%M} 에는 장소에서 출발").dump()
