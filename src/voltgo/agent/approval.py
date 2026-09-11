@@ -73,3 +73,17 @@ def resume_command(decision, reason: str = "", count: int = 1) -> Command:
             d["message"] = reason
         out.append(d)
     return Command(resume={"decisions": out})
+
+
+def pending_approvals(agent, config) -> list[dict]:
+    """checkpoint 에 남아 있는 승인 요청(action_requests) 목록. 없으면 빈 리스트."""
+    try:
+        state = agent.get_state(config)
+    except Exception:
+        return []
+    out = []
+    for it in getattr(state, "interrupts", None) or []:
+        value = getattr(it, "value", None)
+        if isinstance(value, dict):
+            out.extend(value.get("action_requests") or [])
+    return out
