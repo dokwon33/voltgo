@@ -22,3 +22,6 @@ data/raw/*
 # 사용자 선호 저장 파일 (개인 데이터)
 data/prefs/*
 !data/prefs/.gitkeep
+
+# 재현 실행 로그와 환경 기록
+reports/

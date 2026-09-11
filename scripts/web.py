@@ -11,7 +11,7 @@ VoltGo 웹 화면 (scripts/demo.py 의 브라우저 판)
   POST /api/session      {} -> 서버 발급 thread_id + Session 요약
   GET  /api/session      ?thread_id= -> 본인 대화의 상태·승인 복원
   POST /api/ask          {thread_id, text}      -> {response: VoltGoResponse, session}
-  POST /api/decide       {thread_id, approval_id, decision} -> {response, session}
+  POST /api/decide       {thread_id, request_id, decision} -> {response, session}
   POST /api/charging/refresh {thread_id} -> 본인 대화의 충전 상태 갱신
 """
 import json
@@ -32,6 +32,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from demo import make_context                       # demo.py 와 같은 Context 조립 (.env 도 여기서 읽는다)
 from voltgo.agent import memory
 from voltgo.agent.agent import ask, build_agent, decide
+from voltgo.agent.middleware import input_rejection
 from voltgo.clients import ClientError
 from voltgo.core.time_budget import calculate_time_budget
 from voltgo.agent.tools import get_charging_status
@@ -45,7 +46,6 @@ agent = None                   # 첫 질문 때 만든다. 키가 없어도 홈 
 visitors = BrowserSessions()
 contexts = {}                  # (서버가 발급한 user_id, thread_id) -> Context
 owners = {}                    # 서버가 발급한 thread_id -> user_id
-approvals = {}                 # (user_id, thread_id) -> 현재 승인 ID·소비 여부·응답
 lock = threading.Lock()        # 에이전트는 한 번에 한 요청만 처리
 
 
@@ -81,23 +81,14 @@ def context_for(user_id: str, thread_id: str):
     return contexts[user_id, thread_id]
 
 
-def checkpoint_id(user_id: str, thread_id: str):
-    # 서버 내부 checkpoint도 사용자·대화 조합으로 구분한다.
-    return json.dumps(["web", user_id, thread_id], separators=(",", ":"))
-
-
-def remember_approval(context, thread_id, response):
-    key = context.user_id, thread_id
-    if response.status == "awaiting_approval":
-        approvals[key] = {
-            "approval_id": secrets.token_urlsafe(32),
-            "response": response.model_dump(mode="json"),
-            "native_request_id": getattr(response, "request_id", None),
-            "consumed": False,
-        }
-    else:
-        approvals.pop(key, None)
-    return approvals.get(key, {}).get("approval_id")
+def pending_approval(context):
+    """CLI와 같은 승인 원장을 읽는다. 완료 응답은 decide 재전송용으로 보존한다."""
+    session = context.session
+    pending = session.approval_requests.get(session.pending_request_id)
+    if pending is None or pending.decision_payload is not None:
+        return {"request_id": None, "pending_response": None}
+    return {"request_id": session.pending_request_id,
+            "pending_response": pending.prompt_response.model_dump(mode="json") if pending.prompt_response else None}
 
 
 def health(user_id):
@@ -176,10 +167,8 @@ class Handler(SimpleHTTPRequestHandler):
             try:
                 with lock:
                     context = context_for(visitor.user_id, thread_id)
-                    pending = approvals.get((visitor.user_id, thread_id), {})
                     payload = {"thread_id": thread_id, "session": session_summary(context),
-                               "approval_id": pending.get("approval_id") if not pending.get("consumed") else None,
-                               "pending_response": pending.get("response") if not pending.get("consumed") else None}
+                               **pending_approval(context)}
                 return self._json(payload)
             except ConversationNotFound:
                 return self._json({"error": "대화를 찾을 수 없습니다"}, 404)
@@ -246,12 +235,17 @@ class Handler(SimpleHTTPRequestHandler):
         text = body.get("text", "")
         if path == "/api/ask" and (not isinstance(text, str) or not text.strip()):
             return self._json({"error": "질문을 입력해 주세요"}, 400)
+        if path == "/api/ask" and (rejection := input_rejection(text)):
+            return self._json({"error": rejection}, 400)
         decision = body.get("decision")
         if path == "/api/decide" and decision not in ("approve", "reject"):
             return self._json({"error": "approve 또는 reject를 선택해 주세요"}, 400)
-        if path == "/api/decide" and (not self._valid_thread(body.get("approval_id"))
-                                      or not body["approval_id"].isascii()):
-            return self._json({"error": "현재 승인 화면의 approval_id가 필요합니다"}, 400)
+        if path == "/api/decide" and (not self._valid_thread(body.get("request_id"))
+                                      or not body["request_id"].isascii()):
+            return self._json({"error": "현재 승인 화면의 request_id가 필요합니다"}, 400)
+
+        if path == "/api/decide" and not isinstance(body.get("reason", ""), str):
+            return self._json({"error": "reason은 문자열이어야 합니다"}, 400)
 
         visitor = self._visitor()
         if visitor is None:
@@ -263,29 +257,23 @@ class Handler(SimpleHTTPRequestHandler):
                     thread_id, context = new_conversation(visitor.user_id)
                     return self._json({"thread_id": thread_id, "session": session_summary(context)}, 201)
                 context = context_for(visitor.user_id, thread_id)
-                key = visitor.user_id, thread_id
                 if path == "/api/charging/refresh":
                     result = get_charging_status.func(SimpleNamespace(context=context), force_refresh=True)
                     return self._json({"result": result, "session": session_summary(context)})
                 if path == "/api/ask":
-                    if key in approvals:
+                    if context.session.pending_request_id:
                         return self._json({"error": "대기 중인 선호 저장을 먼저 승인하거나 거절해 주세요"}, 409)
                     current_agent = get_agent()
-                    res = ask(current_agent, text, context, checkpoint_id(*key))
+                    res = ask(current_agent, text, context, thread_id)
                 else:
-                    pending = approvals.get(key)
-                    if pending is None or not secrets.compare_digest(pending["approval_id"], body["approval_id"]):
+                    if body["request_id"] not in context.session.approval_requests:
                         return self._json({"error": "승인 요청을 찾을 수 없습니다"}, 404)
-                    if pending["consumed"]:
-                        return self._json({"error": "이미 처리한 승인 요청입니다. 새 대화에서 다시 요청해 주세요"}, 409)
                     current_agent = get_agent()
-                    # 실패·동시 재전송에서도 동일한 승인 ID를 두 번 실행하지 않는다.
-                    pending["consumed"] = True
-                    request_args = {"request_id": pending["native_request_id"]} if pending["native_request_id"] else {}
-                    res = decide(current_agent, decision, context, checkpoint_id(*key), **request_args)
-                approval_id = remember_approval(context, thread_id, res)
+                    res = decide(current_agent, decision, context, thread_id,
+                                 reason=body.get("reason", ""), request_id=body["request_id"])
                 payload = {"response": res.model_dump(mode="json"), "session": session_summary(context),
-                           "thread_id": thread_id, "approval_id": approval_id}
+                           "thread_id": thread_id, **pending_approval(context)}
+
         except ConversationNotFound:
             return self._json({"error": "대화를 찾을 수 없습니다"}, 404)
         except MissingModelKey as e:
@@ -295,7 +283,10 @@ class Handler(SimpleHTTPRequestHandler):
         except Exception:
             # 외부 예외 원문에는 인증 헤더·URL 등이 포함될 수 있다.
             return self._json({"error": "요청을 처리하지 못했습니다. 서버 설정과 연결을 확인해 주세요."}, 500)
-        self._json(payload)
+        status = 409 if res.message.startswith(("[REQUEST_ID_CONFLICT]", "[REQUEST_IN_PROGRESS]")) else 200
+        if status != 200:
+            payload["error"] = res.message
+        self._json(payload, status)
 
     def _json(self, data, status=200, *, cookie=None):
         raw = json.dumps(data, ensure_ascii=False).encode("utf-8")

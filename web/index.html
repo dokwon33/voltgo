@@ -302,10 +302,10 @@
   const min = (sec) => Math.floor((sec || 0) / 60);
 
   let threadId = '', busy = true, health = {}, session = {}, lastRes = null;
-  let history = null, entries = [], pendingApprovalId = null;
+  let history = null, entries = [], pendingRequestId = null;
 
   function clearVisitorView() {
-    history = null; entries = []; threadId = ''; session = {}; lastRes = null; pendingApprovalId = null;
+    history = null; entries = []; threadId = ''; session = {}; lastRes = null; pendingRequestId = null;
     $('#messages').innerHTML = ''; $('#follow').innerHTML = ''; $('#infoList').innerHTML = '';
     $('#approval').hidden = true; $('#info').hidden = true;
     routeMap.reset(); renderCar({}); renderStrip({}, null);
@@ -505,24 +505,26 @@
     busy = true; setLock(); setMood('busy'); addTyping();
     try {
       const d = await api('/api/ask', { thread_id: threadId, text });
-      session = d.session; lastRes = d.response; pendingApprovalId = d.approval_id;
+      session = d.session; lastRes = d.response; pendingRequestId = d.request_id;
       entries.push({ me: text }, { response: d.response, map_data: d.map_data }); history.save(threadId, entries);
       removeTyping(); renderStrip(session, d.response); addBot(d.response, d.map_data);
+      if (d.pending_response) openApproval(d.pending_response);
     } catch (e) { removeTyping(); addError(e.message); }
     finally { busy = false; setLock(); }
   }
 
   async function decideNow(decision) {
-    if (busy || $('#approval').hidden || !pendingApprovalId) return;
+    if (busy || $('#approval').hidden || !pendingRequestId) return;
     $('#approval').hidden = true;
     addMe(decision === 'approve' ? $('#approve').textContent : $('#reject').textContent);
     busy = true; setLock(); setMood('busy'); addTyping();
     try {
-      const d = await api('/api/decide', { thread_id: threadId, decision, approval_id: pendingApprovalId });
-      session = d.session; lastRes = d.response; pendingApprovalId = d.approval_id;
+      const d = await api('/api/decide', { thread_id: threadId, decision, request_id: pendingRequestId });
+      session = d.session; lastRes = d.response; pendingRequestId = d.request_id;
       entries.push({ me: decision === 'approve' ? '네, 기억해줘' : '저장하지 않을게요' }, { response: d.response });
       history.save(threadId, entries);
       removeTyping(); renderStrip(session, d.response); addBot(d.response, d.map_data);
+      if (d.pending_response) openApproval(d.pending_response);
     } catch (e) { removeTyping(); addError(e.message); $('#approval').hidden = [401, 404, 409].includes(e.status); }
     finally { busy = false; setLock(); }
   }
@@ -530,7 +532,7 @@
   async function goHome() {
     if (busy) return;
     routeMap.reset();
-    threadId = ''; session = {}; lastRes = null; entries = []; pendingApprovalId = null;
+    threadId = ''; session = {}; lastRes = null; entries = []; pendingRequestId = null;
     $('#messages').innerHTML = ''; $('#follow').innerHTML = ''; $('#strip').hidden = true;
     $('#approval').hidden = true; $('#chat').hidden = true; $('#home').hidden = false; $('#homeBtn').hidden = true;
     busy = true; setLock();
@@ -559,7 +561,7 @@
             if (typeof entry.me === 'string') addMe(entry.me);
             else if (entry.response) { lastRes = entry.response; addBot(entry.response, entry.map_data, true); }
           }
-          $('#approval').hidden = true; pendingApprovalId = d.approval_id;
+          $('#approval').hidden = true; pendingRequestId = d.request_id;
           if (d.pending_response) openApproval(d.pending_response);
           renderCar(session); renderStrip(session, lastRes);
           busy = false; setLock(); return;

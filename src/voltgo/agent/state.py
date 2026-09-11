@@ -28,6 +28,7 @@ class ApprovalRequest:
     interrupt_ids: tuple[str, ...]
     action_count: int
     requested_at: datetime
+    prompt_response: Optional[VoltGoResponse] = None  # 새로고침 시 현재 승인 화면 복원
     decision_payload: Optional[str] = None
     response: Optional[VoltGoResponse] = None
 

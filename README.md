@@ -217,7 +217,7 @@ python scripts/web.py --fixed    # 14:00 고정 시계 (설계서 C001 조건)
 | `POST /api/session` `{}` | 현재 사용자 소유의 새 대화 ID를 서버에서 발급 |
 | `GET /api/session?thread_id=` | 본인 대화의 Session 요약과 대기 중 승인 복원 |
 | `POST /api/ask` `{thread_id, text}` | `ask()` → `{response: VoltGoResponse, session}` |
-| `POST /api/decide` `{thread_id, approval_id, decision}` | 본인 대화에서 발급한 승인 ID에만 `approve` / `reject` 적용 |
+| `POST /api/decide` `{thread_id, request_id, decision}` | 본인 대화의 ID에 `approve` / `reject` 적용. 동일 결정/거절 사유의 재전송은 기존 응답 |
 | `POST /api/charging/refresh` `{thread_id}` | 본인 대화의 충전 상태를 다시 조회 |
 
 지도는 **UI 준비 단계**다. 현재 서버는 `map_data`를 반환하지 않으므로 지도에 실제 보행 경로가 나타나지 않는다. TMAP 브라우저 지도 키도 기본값은 비어 있다. 연결 규격과 남은 작업은 [지도 프론트 연결 계약](docs/map-frontend-contract.md)에 정리했다. 서버 API 키를 프론트에 복사하지 않는다.
@@ -298,3 +298,18 @@ print(res.status, res.message)
 - [ ] 시연 시나리오 구성
 
 설계서 대비 변경사항: [AS-IS / TO-BE 및 팀별 PR 반영 상태](docs/설계서_변경사항_20260911_2.md).
+
+
+## 재현 가능한 검증
+
+[테스트 케이스와 실행 방법](docs/testing/README.md)에 현재 구성과 입력·기대 결과·확인 근거를 정리했다.
+자동 검증은 외부 모델/API 대신 고정 응답을 사용하며, Python 전체 회귀와 브라우저 기록 검증을 함께 실행한다.
+
+```bash
+python scripts/run_cases.py suite
+python scripts/run_cases.py list
+python scripts/run_cases.py TC22
+```
+
+실행 로그·JUnit XML·커밋/환경/종료 코드 JSON은 `reports/`에 기록된다.
+A 후속 변경 및 남은 협의 항목은 [실행기 보완 작업](docs/tasks/A-runtime-hardening.md)을 참고한다.

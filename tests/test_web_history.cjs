@@ -16,7 +16,7 @@ async function startApp(stored, route) {
   const element = (selector) => {
     if (!elements.has(selector)) elements.set(selector, {
       innerHTML: '', textContent: '', hidden: ['#approval', '#info', '#chat'].includes(selector),
-      style: { setProperty() {} }, addEventListener() {}, scrollHeight: 0,
+      style: { setProperty() {} }, addEventListener() {}, remove() {}, scrollHeight: 0,
       insertAdjacentHTML(_, html) { this.innerHTML += html; },
     });
     return elements.get(selector);
@@ -71,7 +71,38 @@ test('초기화 중 쿠키 사용자가 바뀌면 다른 사용자 ID 아래에 
 test('같은 사용자도 서버에서 대화를 확인한 뒤에만 자기 기록을 복원한다', async () => {
   const app = await startApp({ [key(A)]: JSON.stringify({ thread_id: 'a-thread', entries: [{ me: '내 기록' }] }) },
     (path) => path === '/api/health' ? { data: { user_id: A } }
-      : { data: { thread_id: 'a-thread', session: { user_id: A }, approval_id: null } });
+      : { data: { thread_id: 'a-thread', session: { user_id: A }, request_id: null } });
   assert.deepEqual(app.requests, ['/api/health', '/api/session?thread_id=a-thread']);
   assert.match(app.elements.get('#messages').innerHTML, /내 기록/);
+});
+
+
+test('거절된 질문은 브라우저 영구 기록에 추가하지 않는다', async () => {
+  const app = await startApp({}, (path) => path === '/api/health' ? { data: { user_id: A } }
+    : path === '/api/ask' ? { status: 400, data: { error: '비밀값은 입력하지 마세요' } }
+    : { status: 201, data: { thread_id: 'a-thread', session: { user_id: A } } });
+  await vm.runInContext('send("sk-fake_test_token_only_1234567890")', app.context);
+  assert.deepEqual(JSON.parse(app.values.get(key(A))).entries, []);
+  assert.match(app.elements.get('#messages').innerHTML, /비밀값은 입력하지 마세요/);
+});
+
+test('승인 재전송 응답 뒤에도 새 승인 화면과 request_id를 유지한다', async () => {
+  const pending = { status: 'awaiting_approval', request_id: 'old', message: '선호 저장 승인', candidates: [], warnings: [] };
+  const next = { ...pending, request_id: 'new', message: '새 선호 저장 승인' };
+  let posted;
+  const app = await startApp({ [key(A)]: JSON.stringify({ thread_id: 'a-thread', entries: [] }) },
+    (path, options) => {
+      if (path === '/api/health') return { data: { user_id: A } };
+      if (path === '/api/decide') {
+        posted = JSON.parse(options.body);
+        return { data: { thread_id: 'a-thread', session: { user_id: A }, request_id: 'new',
+          response: { ...pending, status: 'ok', message: '이전 처리 결과' }, pending_response: next } };
+      }
+      return { data: { thread_id: 'a-thread', session: { user_id: A }, request_id: 'old', pending_response: pending } };
+    });
+  await vm.runInContext('decideNow("approve")', app.context);
+  assert.equal(posted.request_id, 'old');
+  assert.equal('approval_id' in posted, false);
+  assert.equal(vm.runInContext('pendingRequestId', app.context), 'new');
+  assert.equal(app.elements.get('#approval').hidden, false);
 });

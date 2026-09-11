@@ -4,7 +4,9 @@
 모델이 준 ModelDecision(후보 ID + 설명) 과 Session 의 검증된 값을 합쳐 VoltGoResponse 를 만든다.
 시각·상호·소요시간은 전부 Session 에서 가져온다. 모델 문장에 숫자가 있어도 근거로 쓰지 않는다.
 """
-from langchain.messages import AIMessage
+import json
+
+from langchain.messages import AIMessage, ToolMessage
 
 from voltgo.agent.schemas import ModelDecision, VoltGoResponse
 from voltgo.agent.state import Context
@@ -158,3 +160,42 @@ def assemble(result: dict, context: Context) -> VoltGoResponse:
         missing_fields=missing,
         **base,
     )
+
+
+def exhausted_alternative_response(result: dict, context: Context):
+    """마지막 단일 도구가 시간 부족을 확인한 경우에만 추가 모델 호출 없이 안내한다.
+
+    이전 턴의 결과나 병렬 도구가 남아 있는 중간 상태로는 최종 응답을 만들지 않는다.
+    대안 판정·정렬·재검색 정책은 alternative_agent가 소유한다.
+    """
+    messages = result.get("messages", [])
+    if len(messages) < 2:
+        return None
+    call, reply = messages[-2:]
+    name = "assess_time_shortage_alternatives"
+    if (not isinstance(call, AIMessage) or len(call.tool_calls) != 1
+            or call.tool_calls[0].get("name") != name
+            or not isinstance(reply, ToolMessage) or reply.name != name
+            or reply.tool_call_id != call.tool_calls[0].get("id")
+            or reply.status == "error" or not isinstance(reply.content, str)):
+        return None
+    try:
+        payload = json.loads(reply.content)
+    except ValueError:
+        return None
+    if not isinstance(payload, dict) or payload.get("status") != "ok":
+        return None
+    data = payload.get("data")
+    if not isinstance(data, dict) or data.get("reason") != "time_insufficient":
+        return None
+    labels = {"meal": "식사", "cafe": "카페", "convenience": "편의점", "mart": "마트"}
+    alternatives = data.get("alternatives")
+    if (not isinstance(alternatives, list) or not alternatives
+            or any(not isinstance(c, str) or c not in labels for c in alternatives)
+            or not context.session.selected_ran or context.session.candidates
+            or context.session.time_budget is None):
+        return None
+    names = ", ".join(labels[c] for c in dict.fromkeys(alternatives))
+    decision = ModelDecision(next_action="clarify", explanation=
+        f"현재 활동은 왕복 이동과 체류에 필요한 시간이 부족합니다. 더 짧은 활동인 {names} 중 무엇을 찾아볼까요?")
+    return assemble({"structured_response": decision}, context)

@@ -1,5 +1,7 @@
 # A: 선호 저장 승인과 request_id 재전송 처리
 
+후속 실행기·웹·검증 변경은 [A 실행기 보완](A-runtime-hardening.md)을 따른다. 아래는 PR7 구현 당시의 기록이다.
+
 통합 기준: PR3·PR5·PR4·PR6가 병합된 main `4582426`.
 브랜치: `feat/a-request-idempotency`.
 

@@ -30,6 +30,17 @@ ALLOWED_TOOLS = {t.name for t in TOOLS}
 SECRET_PATTERN = re.compile(r"sk-[A-Za-z0-9_\-]{20,}")   # OpenAI 키 형태 (노트북 [5] PII 예시)
 
 
+def input_rejection(text: str):
+    """공개 ask 진입점과 middleware가 같은 입력 정책을 사용한다."""
+    if not isinstance(text, str) or not text.strip():
+        return "무엇을 도와드릴까요? 예: '30분 안에 간단히 밥 먹고 싶어'"
+    if len(text) > MAX_INPUT_CHARS:
+        return f"입력이 너무 깁니다 ({MAX_INPUT_CHARS}자 이하로 줄여주세요)."
+    if SECRET_PATTERN.search(text):
+        return "API 키 같은 비밀값은 입력하지 마세요. 요청만 다시 적어주세요."
+    return None
+
+
 def _text(message) -> str:
     c = message.content
     if isinstance(c, str):
@@ -53,16 +64,9 @@ def input_validation(state, runtime):
         return None                      # HITL 재개 등 사람 입력이 아닌 경우
     text = _text(last)
 
-    if not text.strip():
-        return {"messages": [AIMessage(content="무엇을 도와드릴까요? 예: '30분 안에 간단히 밥 먹고 싶어'")],
-                "jump_to": "end"}
-    if len(text) > MAX_INPUT_CHARS:
-        return {"messages": [AIMessage(content=f"입력이 너무 깁니다 ({MAX_INPUT_CHARS}자 이하로 줄여주세요).")],
-                "jump_to": "end"}
-    if SECRET_PATTERN.search(text):
-        print("### input_validation : API 키 형태 감지 - 차단")
-        return {"messages": [AIMessage(content="API 키 같은 비밀값은 입력하지 마세요. 요청만 다시 적어주세요.")],
-                "jump_to": "end"}
+    rejection = input_rejection(text)
+    if rejection:
+        return {"messages": [AIMessage(content=rejection)], "jump_to": "end"}
     return None
 
 

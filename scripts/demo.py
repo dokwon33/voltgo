@@ -18,7 +18,6 @@ from dotenv import load_dotenv
 
 from voltgo.agent.agent import ask, build_agent, decide
 from voltgo.agent.state import KST, Context, Session, now_kst
-from voltgo.clients import ClientError
 from voltgo.clients.hyundai import HyundaiClient
 from voltgo.clients.mock_charging import MockChargingProvider
 from voltgo.clients.tmap_places import MockPlacesClient, TmapPlacesClient
@@ -68,11 +67,7 @@ def main():
             print("종료합니다.")
             break
 
-        try:
-            response = ask(agent, question, context, thread_id)
-        except ClientError as e:
-            print(f"외부 API 오류: {e.code}")
-            continue
+        response = ask(agent, question, context, thread_id)
 
         # 승인이 필요하면 여기서 사람이 결정한다
         while response.status == "awaiting_approval":
