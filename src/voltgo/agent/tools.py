@@ -343,8 +343,17 @@ def confirm_plan(runtime: ToolRuntime, plan_id: str, version: int) -> dict:
         snap = _fetch_charging(ctx) if ctx.charging_provider else s.charging
     except ClientError as e:
         return tool_error(e.code, str(e), retryable=e.retryable)
+    # 추천 단계와 같은 목표 규칙을 재검증에도 적용한다. 원문 잔여시간은 '차량이 설정한 목표' 기준이라
+    # 사용자 목표가 그보다 낮으면 못 쓰고(추정으로), 높으면 차량 목표에서 충전이 멈춘다.
+    update = {"target_soc_pct": s.target_soc_pct}
+    api_target = getattr(snap, "reported_target_soc_pct", None)
+    if api_target is not None:
+        if s.target_soc_pct < api_target:
+            update["reported_remaining_sec"] = None
+        elif s.target_soc_pct > api_target:
+            update["target_soc_pct"] = api_target
     budget, err = time_budget.calculate_time_budget(
-        snap.model_copy(update={"target_soc_pct": s.target_soc_pct}), now,
+        snap.model_copy(update=update), now,
         buffer_min=ctx.buffer_min, user_limit_min=s.user_limit_min, limit_said_at=s.limit_said_at)
     if err is not None:
         return tool_error(err, "재검증 실패. 다시 계획하세요.")
