@@ -8,11 +8,19 @@ from langchain.agents.middleware import HumanInTheLoopMiddleware
 from langgraph.types import Command
 
 
-def _describe(request):
-    call = request.tool_call
-    if call["name"] == "confirm_plan":
-        return f"계획 {call['args'].get('plan_id')} 을(를) 확정할까요?"
-    return f"선호를 저장할까요? {call['args']}"
+def _describe(tool_call, state=None, runtime=None):
+    """HITL 승인 화면 문구.
+
+    langchain 의 HumanInTheLoopMiddleware 는 description 콜백을
+    description(tool_call, state, runtime) 3 인자로 부른다.
+    """
+    args = tool_call.get("args", {})
+    if tool_call["name"] == "confirm_plan":
+        return f"계획 {args.get('plan_id')} (v{args.get('version')}) 을(를) 확정할까요?"
+    if tool_call["name"] == "save_preferences":
+        items = ", ".join(f"{k}={v}" for k, v in args.items() if v is not None) or "없음"
+        return f"선호를 저장할까요? ({items})"
+    return f"{tool_call['name']} 을(를) 실행할까요? {args}"
 
 
 def approval_middleware():
@@ -28,11 +36,20 @@ def approval_middleware():
     )
 
 
-def resume_command(decision: str, reason: str = "") -> Command:
-    """approve / reject 를 LangGraph 재개 명령으로 바꾼다"""
-    if decision not in ("approve", "reject"):
-        raise ValueError("decision 은 approve 또는 reject")
-    d = {"type": decision}
-    if decision == "reject" and reason:
-        d["message"] = reason
-    return Command(resume={"decisions": [d]})
+def resume_command(decision, reason: str = "", count: int = 1) -> Command:
+    """approve / reject 를 LangGraph 재개 명령으로 바꾼다.
+
+    한 응답에 승인 대상 도구가 여러 개면 결정도 같은 개수로 보내야 재개된다.
+    - decision 이 문자열이면 count 개만큼 같은 결정을 반복한다.
+    - decision 이 리스트면 요청 순서대로 하나씩 대응시킨다.
+    """
+    decisions = decision if isinstance(decision, (list, tuple)) else [decision] * max(count, 1)
+    out = []
+    for dec in decisions:
+        if dec not in ("approve", "reject"):
+            raise ValueError("decision 은 approve 또는 reject")
+        d = {"type": dec}
+        if dec == "reject" and reason:
+            d["message"] = reason
+        out.append(d)
+    return Command(resume={"decisions": out})
