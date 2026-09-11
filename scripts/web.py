@@ -7,12 +7,13 @@ VoltGo 웹 화면 (scripts/demo.py 의 브라우저 판)
 
 외부 패키지 없이 표준 http.server 로 띄운다. 에이전트 호출은 demo.py 와 같은 ask() / decide().
   GET  /                 web/index.html
+  GET  /map-config.js    .env 의 TMAP_MAP_APP_KEY(브라우저 공개용 지도 키)만 주입
   GET  /api/health       익명 접속 세션 발급·검증 + 현재 접속자의 실행 정보
   POST /api/session      {} -> 서버 발급 thread_id + Session 요약
-  GET  /api/session      ?thread_id= -> 본인 대화의 상태·승인 복원
-  POST /api/ask          {thread_id, text}      -> {response: VoltGoResponse, session}
+  GET  /api/session      ?thread_id= -> 본인 대화의 상태·승인·지도 복원
+  POST /api/ask          {thread_id, text, selection?} -> {response, session, map_data, approval_id}
   POST /api/decide       {thread_id, approval_id, decision} -> {response, session}
-  POST /api/charging/refresh {thread_id} -> 본인 대화의 충전 상태 갱신
+  POST /api/charging/refresh {thread_id} -> 본인 대화의 충전 상태 갱신 + 지난 추천 무효화
 """
 import json
 import os
@@ -20,10 +21,12 @@ import secrets
 import sys
 import threading
 import webbrowser
+from datetime import timedelta
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlparse
+from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
@@ -32,14 +35,17 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from demo import make_context                       # demo.py 와 같은 Context 조립 (.env 도 여기서 읽는다)
 from voltgo.agent import memory
 from voltgo.agent.agent import ask, build_agent, decide
+from voltgo.agent.approval import pending_approvals
+from voltgo.agent.requests import config_for
+from voltgo.agent.tools import APPROVAL_TTL_SEC, CANDIDATE_TTL_SEC, get_charging_status
 from voltgo.clients import ClientError
 from voltgo.core.time_budget import calculate_time_budget
-from voltgo.agent.tools import get_charging_status
 from voltgo.web_sessions import BrowserSessions
 
 WEB_DIR = ROOT / "web"
 FIXED = "--fixed" in sys.argv
 COOKIE_SECURE = os.getenv("VOLTGO_COOKIE_SECURE", "false").lower() == "true"
+INSTANCE_ID = uuid4().hex      # 서버를 다시 켜면 바뀐다. 화면은 이 값으로 '이어서 대화 가능' 여부를 표시한다
 
 agent = None                   # 첫 질문 때 만든다. 키가 없어도 홈 화면(차량 상태)은 뜨게
 visitors = BrowserSessions()
@@ -55,6 +61,10 @@ class MissingModelKey(RuntimeError):
 
 class ConversationNotFound(Exception):
     pass
+
+
+class StaleSelection(ValueError):
+    """화면에서 누른 후보·충전소가 지금 조건과 맞지 않는다."""
 
 
 def get_agent():
@@ -89,10 +99,16 @@ def checkpoint_id(user_id: str, thread_id: str):
 def remember_approval(context, thread_id, response):
     key = context.user_id, thread_id
     if response.status == "awaiting_approval":
+        requested = context.session.approval_requested_at
+        # ask()/decide() 가 쓰는 것과 같은 checkpoint 설정으로 대기 중인 요청을 읽는다
+        config = config_for(context.user_id, checkpoint_id(*key))
         approvals[key] = {
             "approval_id": secrets.token_urlsafe(32),
             "response": response.model_dump(mode="json"),
             "native_request_id": getattr(response, "request_id", None),
+            # 승인 시트에 '무엇을 저장할지'를 그대로 보여주기 위한 원문 요청
+            "actions": pending_approvals(agent, config) if agent else [],
+            "expires_at": (requested + timedelta(seconds=APPROVAL_TTL_SEC)).isoformat() if requested else None,
             "consumed": False,
         }
     else:
@@ -109,6 +125,7 @@ def health(user_id):
         "clock": "fixed" if FIXED else "real",
         "user_id": user_id,
         "identity": "anonymous_browser_session",
+        "instance_id": INSTANCE_ID,
     }
 
 
@@ -133,23 +150,87 @@ def peek_budget(context, snap):
 
 
 def session_summary(context):
-    """VoltGoResponse 에 없는 값(SoC, 출발지, 저장 선호, 호출 횟수)을 Session 에서 꺼내 화면에 준다."""
+    """VoltGoResponse 에 없는 값(SoC, 출발지, 후보, 저장 선호, 호출 횟수)을 Session 에서 꺼내 화면에 준다."""
     s = context.session
     pref = memory.load_preferences(context.user_id)
     dump = lambda m: m.model_dump(mode="json") if m else None
     snap = peek_charging(context)
+    # 목표 충전량은 차량 조회값으로만 채운다 (대화로 바꾸지 않는다).
+    display = snap.model_copy(update={"target_soc_pct": snap.vehicle_target_soc_pct}) if snap else None
+    current_budget = None
+    if s.time_budget and display:
+        current_budget, _ = calculate_time_budget(
+            display, context.clock(), buffer_min=context.buffer_min,
+            user_limit_min=s.user_limit_min, limit_said_at=s.limit_said_at)
     return {
         "user_id": context.user_id,
         "now": context.clock().isoformat(),
         "charging": dump(snap),
-        "home_budget": dump(peek_budget(context, snap)),
+        "display_charging": dump(display),
+        "home_budget": dump(peek_budget(context, display)),
+        "effective_target_soc_pct": display.target_soc_pct if display else None,
         "origin": s.origin.name if s.origin else None,
-        "time_budget": dump(s.time_budget),
+        "station_candidates": [dump(c) for c in s.station_candidates.values()],
+        "user_limit_min": s.user_limit_min,
+        "dwell_overrides": s.dwell_overrides,
+        "candidates": [dump(c) for c in s.candidates.values()],
+        "time_budget": dump(current_budget),
         "condition_version": s.condition_version,
         "confirmed": dump(s.confirmed),
         "preferences": dump(pref),
         "counters": s.counters,
     }
+
+
+def map_data(context):
+    """지도에 그릴 출발지·장소·경로. 현재 RoundTrip 은 시간/거리만 있어 선 좌표는 D 의 계약 확장 대기."""
+    s = context.session
+    return {
+        "origin": s.origin.model_dump(mode="json") if s.origin else None,
+        "places": [p.model_dump(mode="json") for p in s.places.values()],
+        "routes": [r.model_dump(mode="json") for r in s.routes.values()],
+    }
+
+
+def envelope(context, thread_id, response=None):
+    """웹 전용 응답. 핵심 에이전트의 응답 계약·승인 정책은 그대로 두고 화면에 필요한 값만 붙인다."""
+    pending = approvals.get((context.user_id, thread_id))
+    live = pending if pending and not pending["consumed"] else None
+    return {
+        "thread_id": thread_id,
+        "instance_id": INSTANCE_ID,
+        "session": session_summary(context),
+        "response": response.model_dump(mode="json") if response else None,
+        "approval_id": live["approval_id"] if live else None,
+        "pending_approval": {"approval_id": live["approval_id"], "actions": live["actions"],
+                             "expires_at": live["expires_at"]} if live else None,
+        "pending_response": live["response"] if live else None,
+        "map_data": map_data(context),
+    }
+
+
+def validate_selection(context, body):
+    """모델을 부르기 전에, 누른 후보의 ID 뿐 아니라 버전·생성 시각까지 지금 조건과 맞는지 확인한다."""
+    s = context.session
+    selection = body.get("selection")
+    if not selection:
+        return body.get("text", "")
+    if not isinstance(selection, dict):
+        raise StaleSelection("올바른 선택 정보가 필요합니다.")
+    if selection.get("kind") == "station":
+        station = s.station_candidates.get(selection.get("id"))
+        if station is None:
+            raise StaleSelection("지난 충전소 후보입니다. 충전소를 다시 검색해 주세요.")
+        return f"출발 충전소는 {station.name}입니다. find_station의 station_id={station.poi_id}로 선택하고 다시 추천해줘."
+    if selection.get("kind") != "plan":
+        raise StaleSelection("선택 종류가 올바르지 않습니다.")
+    candidate = s.candidates.get(selection.get("id"))
+    if (candidate is None or candidate.version != selection.get("version")
+            or candidate.version != s.condition_version
+            or candidate.evaluated_at.isoformat() != selection.get("evaluated_at")
+            or (context.clock() - candidate.evaluated_at).total_seconds() > CANDIDATE_TTL_SEC):
+        raise StaleSelection("조건이 바뀌었거나 시간이 지난 추천입니다. 현재 조건으로 다시 추천받아 주세요.")
+    return f"{candidate.name} 계획을 선택합니다. confirm_plan(plan_id={candidate.plan_id}, version={candidate.version})으로 지금 다시 검증하고 확정해줘."
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -158,6 +239,8 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         url = urlparse(self.path)
+        if url.path == "/map-config.js":
+            return self._map_config()
         if url.path.startswith("/api/") and not self._same_origin():
             return self._json({"error": "같은 사이트에서 요청해 주세요"}, 403)
         if url.path == "/api/health":
@@ -175,12 +258,7 @@ class Handler(SimpleHTTPRequestHandler):
                 return self._json({"error": "thread_id는 1~128자 문자열이어야 합니다"}, 400)
             try:
                 with lock:
-                    context = context_for(visitor.user_id, thread_id)
-                    pending = approvals.get((visitor.user_id, thread_id), {})
-                    payload = {"thread_id": thread_id, "session": session_summary(context),
-                               "approval_id": pending.get("approval_id") if not pending.get("consumed") else None,
-                               "pending_response": pending.get("response") if not pending.get("consumed") else None}
-                return self._json(payload)
+                    return self._json(envelope(context_for(visitor.user_id, thread_id), thread_id))
             except ConversationNotFound:
                 return self._json({"error": "대화를 찾을 수 없습니다"}, 404)
             except Exception:
@@ -190,6 +268,17 @@ class Handler(SimpleHTTPRequestHandler):
         if url.path == "/":
             self.path = "/index.html"
         return super().do_GET()
+
+    def _map_config(self):
+        # 브라우저 공개용 지도 키만 준다. 서버 API 키(TMAP_APP_KEY)로 대체하지 않는다.
+        config = {"appKey": os.getenv("TMAP_MAP_APP_KEY", "").strip()}
+        raw = ("window.VOLTGO_MAP_CONFIG = " + json.dumps(config) + ";\n").encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/javascript; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
 
     @staticmethod
     def _valid_thread(value):
@@ -244,8 +333,8 @@ class Handler(SimpleHTTPRequestHandler):
         if path != "/api/session" and not self._valid_thread(thread_id):
             return self._json({"error": "thread_id는 1~128자 문자열이어야 합니다"}, 400)
         text = body.get("text", "")
-        if path == "/api/ask" and (not isinstance(text, str) or not text.strip()):
-            return self._json({"error": "질문을 입력해 주세요"}, 400)
+        if path == "/api/ask" and (not isinstance(text, str) or not text.strip() or len(text) > 2000):
+            return self._json({"error": "질문을 1~2000자로 입력해 주세요"}, 400)
         decision = body.get("decision")
         if path == "/api/decide" and decision not in ("approve", "reject"):
             return self._json({"error": "approve 또는 reject를 선택해 주세요"}, 400)
@@ -261,15 +350,22 @@ class Handler(SimpleHTTPRequestHandler):
             with lock:
                 if path == "/api/session":
                     thread_id, context = new_conversation(visitor.user_id)
-                    return self._json({"thread_id": thread_id, "session": session_summary(context)}, 201)
+                    return self._json(envelope(context, thread_id), 201)
                 context = context_for(visitor.user_id, thread_id)
                 key = visitor.user_id, thread_id
                 if path == "/api/charging/refresh":
+                    if key in approvals and not approvals[key]["consumed"]:
+                        return self._json({"error": "대기 중인 선호 저장을 먼저 승인하거나 거절해 주세요"}, 409)
                     result = get_charging_status.func(SimpleNamespace(context=context), force_refresh=True)
-                    return self._json({"result": result, "session": session_summary(context)})
+                    if result["status"] != "ok":
+                        return self._json({"error": result.get("message") or "충전 정보를 다시 읽지 못했습니다"}, 502)
+                    # 충전 조건이 달라졌을 수 있으므로 화면에 남은 이전 추천은 모두 다시 받게 한다.
+                    context.session.bump_version()
+                    return self._json({**envelope(context, thread_id), "result": result})
                 if path == "/api/ask":
                     if key in approvals:
                         return self._json({"error": "대기 중인 선호 저장을 먼저 승인하거나 거절해 주세요"}, 409)
+                    text = validate_selection(context, body)
                     current_agent = get_agent()
                     res = ask(current_agent, text, context, checkpoint_id(*key))
                 else:
@@ -283,11 +379,12 @@ class Handler(SimpleHTTPRequestHandler):
                     pending["consumed"] = True
                     request_args = {"request_id": pending["native_request_id"]} if pending["native_request_id"] else {}
                     res = decide(current_agent, decision, context, checkpoint_id(*key), **request_args)
-                approval_id = remember_approval(context, thread_id, res)
-                payload = {"response": res.model_dump(mode="json"), "session": session_summary(context),
-                           "thread_id": thread_id, "approval_id": approval_id}
+                remember_approval(context, thread_id, res)
+                payload = envelope(context, thread_id, res)
         except ConversationNotFound:
             return self._json({"error": "대화를 찾을 수 없습니다"}, 404)
+        except StaleSelection as e:
+            return self._json({"error": str(e)}, 409)
         except MissingModelKey as e:
             return self._json({"error": str(e)}, 503)
         except ClientError as e:
@@ -327,7 +424,7 @@ def main():
     else:
         sys.exit(f"{port}~{port + 9} 번 포트가 모두 사용 중입니다. --port 로 지정하세요.")
     url = f"http://localhost:{p}"
-    print(f"* VoltGo web : {url}   브라우저별 익명 세션 / clock={'14:00 고정' if FIXED else '실제 시각'}")
+    print(f"* VoltGo web : {url}   브라우저별 접속 세션 / clock={'14:00 고정' if FIXED else '실제 시각'}")
     webbrowser.open(url)
     server.serve_forever()
 

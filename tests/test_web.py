@@ -85,7 +85,7 @@ class Browser:
 def test_home_assets_and_session_work_without_model_key(web, monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     browser = Browser(web)
-    for path in ["/", "/map.js", "/map.css", "/map-config.js", "/session.js", "/img/volty_hello.png"]:
+    for path in ["/", "/app.js", "/features.js", "/map.js", "/map-leaflet.js", "/map.css", "/map-config.js", "/img/volty_hello.png"]:
         status, content = browser.request("GET", path)
         assert status == 200 and content
     tid = browser.conversation()

@@ -247,24 +247,26 @@ def test_읽기_도구만_제안되면_승인_시각을_기록하지_않는다(c
 
 
 # ================================================================
-# 확정 재검증이 추천보다 관대해지면 안 된다 (목표 SoC 불일치, C028 연계)
+# 확정 재검증은 최신 차량 목표/잔여시간을 사용한다. 세션의 옛 목표는 무시한다.
 # ================================================================
-def test_사용자_목표가_차량_목표보다_낮으면_재검증도_원문_잔여시간을_쓰지_않는다(context):
+def test_차량_목표가_갱신되면_재검증은_새_원문_잔여시간을_쓴다(context):
     version = _plan_ready(context)
     s = context.session
     base = context.clock()
-    # 차량은 100% 까지 충전하도록 설정(원문 잔여 60분), 사용자 목표는 80%
+    # 차량 설정이 100%로 갱신됐지만 이전 계산 목표는 80%로 남은 상황
     s.charging = s.charging.model_copy(update={"reported_target_soc_pct": 100, "reported_remaining_sec": 3600})
     context.charging_provider = None          # 재검증 때 새로 조회하지 않고 위 상태를 쓰게 한다
 
     r = tools.confirm_plan.func(_RT(context), plan_id="A", version=version)
     assert r["status"] == "ok"
-    # 추정 경로: (80-40)% x 60kWh / 48kW = 30분 -> 완료 14:30, 버퍼 5분 -> 마감 14:25
-    assert s.time_budget.return_deadline == base + timedelta(minutes=25), \
-        "원문 잔여시간(100% 기준 60분)으로 마감이 14:55 처럼 늘어나면 안 된다"
+    assert s.time_budget.finish_at == base + timedelta(minutes=60)
+    assert s.time_budget.estimate_basis == "reported_remaining"
+    assert s.target_soc_pct == 100
+    # 외출 시간 제한 30분은 충전 목표와 별개로 유지한다.
+    assert s.time_budget.return_deadline == base + timedelta(minutes=25)
 
 
-def test_사용자_목표가_차량_목표보다_높으면_차량_목표에서_멈추는_것으로_재검증한다(context):
+def test_세션의_목표가_달라도_차량_목표로_재검증한다(context):
     version = _plan_ready(context)
     s = context.session
     s.charging = s.charging.model_copy(update={"reported_target_soc_pct": 80, "reported_remaining_sec": 1800})
@@ -275,3 +277,4 @@ def test_사용자_목표가_차량_목표보다_높으면_차량_목표에서_�
     assert r["status"] == "ok"
     assert s.time_budget.finish_at == context.clock() + timedelta(seconds=1800), \
         "차량은 80% 에서 멈추므로 원문 잔여 30분 기준이어야 한다"
+    assert s.target_soc_pct == 80
