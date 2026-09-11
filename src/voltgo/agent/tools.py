@@ -1,12 +1,11 @@
 """
-VoltGo Tool 8개 + find_station (설계서 2.5)
+VoltGo Tool 10개 (설계서 2.5)
 
 노트북 [4] 의 @tool 패턴. 실행 컨텍스트가 필요한 도구는 runtime: ToolRuntime 을 받는다 (노트북 [5] 4-2).
 모델 인자에는 runtime 이 안 보이므로 실차 ID·좌표·API 키를 모델이 마음대로 정할 수 없다.
 
 반환은 전부 ToolResult.dump() (dict). 원문 응답 전문은 넣지 않는다.
 """
-from datetime import datetime, timedelta
 from typing import Optional
 
 from langchain.tools import ToolRuntime, tool
@@ -19,7 +18,7 @@ from voltgo.agent.schemas import (
 from voltgo.clients import ClientError
 from voltgo.core import feasibility
 from voltgo.core.place_policy import (
-    DWELL_DEFAULT_MIN, MAX_DIST_M, MAX_ROUTE_CANDIDATES, auto_max_dist_m, dwell_sec_for, filter_places,
+    MAX_DIST_M, MAX_ROUTE_CANDIDATES, auto_max_dist_m, dwell_sec_for, filter_places,
 )
 from voltgo.core import time_budget
 from voltgo.core.time_budget import STALE_AFTER_SEC

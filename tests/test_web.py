@@ -138,17 +138,20 @@ def test_web_preference_approval_and_blocked_new_question(web, decision, saved):
     tid = browser.conversation()
     status, data = browser.request("POST", "/api/ask", {"thread_id": tid, "text": "카페 기억해줘"})
     assert status == 200 and data["response"]["status"] == "awaiting_approval"
-    approval_id = data["approval_id"]
-    assert browser.summary(tid)[1]["approval_id"] == approval_id  # 새로고침해도 본인 승인만 복원
+    request_id = data["request_id"]
+    assert browser.summary(tid)[1]["request_id"] == request_id  # 새로고침해도 본인 승인만 복원
     assert memory.load_preferences(browser.user_id) is None
     assert browser.request("POST", "/api/ask", {"thread_id": tid, "text": "다른 질문"})[0] == 409
-    body = {"thread_id": tid, "decision": decision, "approval_id": approval_id}
+    body = {"thread_id": tid, "decision": decision, "request_id": request_id}
     status, data = browser.request("POST", "/api/decide", body)
     assert status == 200
     assert (data["session"]["preferences"] is not None) == saved
     assert (memory.load_preferences(browser.user_id) is not None) == saved
-    assert browser.request("POST", "/api/decide", body)[0] == 404  # 이미 소비한 ID는 재실행하지 않음
-    assert browser.summary(tid)[1]["approval_id"] is None
+    replay_status, replay = browser.request("POST", "/api/decide", body)
+    assert replay_status == 200 and replay["response"] == data["response"]
+    conflict = {**body, "decision": "reject" if saved else "approve"}
+    assert browser.request("POST", "/api/decide", conflict)[0] == 409
+    assert browser.summary(tid)[1]["request_id"] is None
 
 
 def test_upstream_exception_details_are_not_exposed(web, monkeypatch):
@@ -179,7 +182,7 @@ def test_identity_is_server_issued_and_health_is_not_cached(web, monkeypatch):
     ("GET", "/api/session?thread_id=x", None), ("POST", "/api/session", {}),
     ("POST", "/api/ask", {"thread_id": "x", "text": "hi"}),
     ("POST", "/api/charging/refresh", {"thread_id": "x"}),
-    ("POST", "/api/decide", {"thread_id": "x", "decision": "approve", "approval_id": "x"}),
+    ("POST", "/api/decide", {"thread_id": "x", "decision": "approve", "request_id": "x"}),
 ])
 def test_every_conversation_api_requires_valid_cookie(web, method, path, body):
     status, data = Browser(web, bootstrap=False).request(method, path, body)
@@ -202,7 +205,7 @@ def test_other_browser_cannot_read_or_mutate_known_conversation(web, monkeypatch
         status, data = b.summary(tid)
     else:
         path = {"ask": "/api/ask", "refresh": "/api/charging/refresh", "approve": "/api/decide"}[operation]
-        status, data = b.request("POST", path, {"thread_id": tid, "text": "질문", "decision": "approve", "approval_id": "known"})
+        status, data = b.request("POST", path, {"thread_id": tid, "text": "질문", "decision": "approve", "request_id": "known"})
     assert status == 404 and data == {"error": "대화를 찾을 수 없습니다"}
     assert web.contexts[a.user_id, tid].session == before
     assert len(web.contexts) == 1
@@ -224,7 +227,7 @@ def test_tampered_cookie_and_user_id_payload_do_not_impersonate_owner(web):
     assert browser.summary(tid)[0] == 401
     browser.cookie = original
     assert browser.request("POST", "/api/ask", {"thread_id": tid, "text": "질문", "user_id": "victim"})[0] == 400
-    assert browser.request("POST", "/api/decide", {"thread_id": tid, "decision": "approve", "approval_id": "가짜"})[0] == 400
+    assert browser.request("POST", "/api/decide", {"thread_id": tid, "decision": "approve", "request_id": "가짜"})[0] == 400
 
 
 def test_two_browsers_save_and_delete_preferences_independently(web):
@@ -244,15 +247,15 @@ def test_two_browsers_save_and_delete_preferences_independently(web):
     web.agent = build_agent(model=model)
     a, b = Browser(web), Browser(web)
     at, bt = a.conversation(), b.conversation()
-    ap = a.request("POST", "/api/ask", {"thread_id": at, "text": "A만의 카페 취향"})[1]["approval_id"]
-    bp = b.request("POST", "/api/ask", {"thread_id": bt, "text": "B만의 식사 취향"})[1]["approval_id"]
+    ap = a.request("POST", "/api/ask", {"thread_id": at, "text": "A만의 카페 취향"})[1]["request_id"]
+    bp = b.request("POST", "/api/ask", {"thread_id": bt, "text": "B만의 식사 취향"})[1]["request_id"]
     assert ap != bp
-    assert b.request("POST", "/api/decide", {"thread_id": bt, "decision": "approve", "approval_id": ap})[0] == 404
-    assert b.summary(bt)[1]["approval_id"] == bp
+    assert b.request("POST", "/api/decide", {"thread_id": bt, "decision": "approve", "request_id": ap})[0] == 404
+    assert b.summary(bt)[1]["request_id"] == bp
     assert memory.load_preferences(a.user_id) is None and memory.load_preferences(b.user_id) is None
-    assert a.request("POST", "/api/decide", {"thread_id": at, "decision": "approve", "approval_id": ap})[0] == 200
+    assert a.request("POST", "/api/decide", {"thread_id": at, "decision": "approve", "request_id": ap})[0] == 200
     assert memory.load_preferences(b.user_id) is None
-    assert b.request("POST", "/api/decide", {"thread_id": bt, "decision": "approve", "approval_id": bp})[0] == 200
+    assert b.request("POST", "/api/decide", {"thread_id": bt, "decision": "approve", "request_id": bp})[0] == 200
     assert memory.load_preferences(a.user_id).preferred_category == "cafe"
     assert memory.load_preferences(b.user_id).preferred_category == "meal"
     assert any("B만의" in message for message in model.seen[1])
@@ -264,32 +267,40 @@ def test_two_browsers_save_and_delete_preferences_independently(web):
     assert b.summary(b.conversation())[1]["session"]["preferences"]["preferred_category"] == "meal"
 
 
-def test_approval_id_is_also_bound_to_conversation_for_same_user(web):
+def test_request_id_is_also_bound_to_conversation_for_same_user(web):
     web.agent = build_agent(model=ScriptedModel(script=[_ai([_tc("save_preferences", {"category": "cafe"}, "s")])]))
     browser = Browser(web)
     first, second = browser.conversation(), browser.conversation()
-    pending = browser.request("POST", "/api/ask", {"thread_id": first, "text": "기억해줘"})[1]["approval_id"]
-    assert browser.request("POST", "/api/decide", {"thread_id": second, "approval_id": pending, "decision": "approve"})[0] == 404
-    assert browser.summary(first)[1]["approval_id"] == pending
+    pending = browser.request("POST", "/api/ask", {"thread_id": first, "text": "기억해줘"})[1]["request_id"]
+    assert browser.request("POST", "/api/decide", {"thread_id": second, "request_id": pending, "decision": "approve"})[0] == 404
+    assert browser.summary(first)[1]["request_id"] == pending
     assert web.contexts[browser.user_id, first] is not web.contexts[browser.user_id, second]
 
 
 def test_failed_approval_is_not_executed_again(web, monkeypatch):
-    web.agent = build_agent(model=ScriptedModel(script=[_ai([_tc("save_preferences", {"category": "cafe"}, "s")])]))
+    class FailingModel(ScriptedModel):
+        def _generate(self, messages, **kwargs):
+            if self.idx == 1:
+                raise RuntimeError("uncertain execution; private upstream details")
+            return super()._generate(messages, **kwargs)
+    web.agent = build_agent(model=FailingModel(script=[_ai([_tc("save_preferences", {"category": "cafe"}, "s")])]))
     browser = Browser(web)
     tid = browser.conversation()
-    pending = browser.request("POST", "/api/ask", {"thread_id": tid, "text": "기억해줘"})[1]["approval_id"]
+    pending = browser.request("POST", "/api/ask", {"thread_id": tid, "text": "기억해줘"})[1]["request_id"]
     calls = []
-
-    def fail(*args, **kwargs):
+    original = memory.save_preferences
+    def save(record):
         calls.append(1)
-        raise RuntimeError("uncertain execution")
-    monkeypatch.setattr(web, "decide", fail)
-    body = {"thread_id": tid, "approval_id": pending, "decision": "approve"}
-    assert browser.request("POST", "/api/decide", body)[0] == 500
-    assert browser.request("POST", "/api/decide", body)[0] == 409
+        return original(record)
+    monkeypatch.setattr(memory, "save_preferences", save)
+    body = {"thread_id": tid, "request_id": pending, "decision": "approve"}
+    status, first = browser.request("POST", "/api/decide", body)
+    assert status == 200 and "APPROVAL_EXECUTION_FAILED" in first["response"]["message"]
+    assert "private upstream" not in str(first)
+    status, replay = browser.request("POST", "/api/decide", body)
+    assert status == 200 and replay["response"] == first["response"]
     assert len(calls) == 1
-    assert browser.summary(tid)[1]["approval_id"] is None
+    assert browser.summary(tid)[1]["request_id"] is None
 
 
 def test_expired_cookie_cannot_recover_previous_visitor(web):
@@ -326,3 +337,37 @@ def test_https_cookie_setting_and_same_origin_refresh(web, monkeypatch):
     status, data = browser.request("POST", "/api/charging/refresh", {"thread_id": tid}, headers={"Origin": "https://localhost:8000"})
     assert status == 200 and data["result"]["status"] == "ok"
     assert context.session.charging is not None
+
+
+@pytest.mark.parametrize("text", ["sk-" + "fake_test_token_" * 3, "x" * 501])
+def test_web_rejects_input_before_model_creation(web, monkeypatch, text):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    browser = Browser(web)
+    tid = browser.conversation()
+    status, data = browser.request("POST", "/api/ask", {"thread_id": tid, "text": text})
+    assert status == 400 and "response" not in data and text not in str(data)
+    assert web.agent is None
+
+
+def test_replay_old_request_preserves_new_pending_prompt_and_reason_conflicts(web):
+    model = ScriptedModel(script=[
+        _ai([_tc("save_preferences", {"category": "cafe"}, "first")]), _done(),
+        _ai([_tc("save_preferences", {"category": "mart"}, "second")]), _done(),
+    ])
+    web.agent = build_agent(model=model)
+    browser = Browser(web)
+    tid = browser.conversation()
+    first = browser.request("POST", "/api/ask", {"thread_id": tid, "text": "카페 기억해줘"})[1]
+    assert first["request_id"] == first["response"]["request_id"]
+    body = {"thread_id": tid, "request_id": first["request_id"], "decision": "reject", "reason": "이번에는 저장하지 않음"}
+    completed = browser.request("POST", "/api/decide", body)[1]
+    second = browser.request("POST", "/api/ask", {"thread_id": tid, "text": "마트로 바꿔서 기억해줘"})[1]
+    used = model.idx
+    status, replay = browser.request("POST", "/api/decide", body)
+    assert status == 200 and replay["response"] == completed["response"] and model.idx == used
+    assert replay["request_id"] == second["request_id"] != first["request_id"]
+    assert replay["pending_response"] == second["response"]
+    assert browser.summary(tid)[1]["pending_response"] == second["response"]
+    assert browser.request("POST", "/api/decide", {**body, "reason": "변경"})[0] == 409
+    assert browser.request("POST", "/api/decide", {**body, "reason": []})[0] == 400
+    assert memory.load_preferences(browser.user_id) is None

@@ -223,7 +223,7 @@ python scripts/web.py --fixed    # 14:00 고정 시계 (설계서 C001 조건)
 | `POST /api/session` `{}` | 현재 사용자 소유의 새 대화 ID를 서버에서 발급 |
 | `GET /api/session?thread_id=` | 본인 대화의 Session 요약, 대기 중 승인, `map_data` 복원 |
 | `POST /api/ask` `{thread_id, text, selection?}` | 선택한 후보의 ID·버전·생성시각을 검증한 뒤 `ask()` |
-| `POST /api/decide` `{thread_id, approval_id, decision}` | 본인 대화에서 발급한 승인 ID에만 `approve` / `reject` 적용 |
+| `POST /api/decide` `{thread_id, request_id, decision, reason?}` | 동일 결정·거절 사유의 재전송은 저장을 반복하지 않고 기존 응답 반환 |
 | `POST /api/charging/refresh` `{thread_id}` | 본인 대화의 충전 상태 강제 조회, 이전 추천 무효화 |
 
 지도 키는 `.env`의 `TMAP_MAP_APP_KEY`에 설정합니다. 웹 서버가 `/map-config.js`에 이 값만 전달하며, 브라우저에서 공개되는 키입니다.
@@ -275,15 +275,8 @@ print(res.status, res.message)
 
 승인 재전송 계약과 Session 사용법은 [A 작업 문서](docs/tasks/A-request-idempotency.md)를 참고하세요.
 
-## 9. 데이터 출처
 
-| 데이터 | 출처 | 비고 |
-| --- | --- | --- |
-| 충전 상태 | 현대자동차 Developers API | 접근 불가 시 `data/mock/` 사용 |
-| 장소 정보 | [TMAP API (SK open API)](https://openapi.sk.com/) | POI 검색 |
-| 보행 경로 | [TMAP API (SK open API)](https://openapi.sk.com/) | 보행자 경로 |
-
-## 10. 로드맵
+## 9. 로드맵
 
 - [x] 설계: 요구사항 정리, 에이전트 Tool 스펙 정의
 - [x] TMAP API 키 발급 및 응답 탐색 (`scripts/probe_tmap_places.py`)
@@ -299,3 +292,20 @@ print(res.status, res.message)
 - [ ] 시연 시나리오 구성
 
 설계서 대비 변경사항: [AS-IS / TO-BE 및 팀별 PR 반영 상태](docs/설계서_변경사항_20260911_2.md).
+
+
+## 재현 가능한 검증
+
+[테스트 케이스와 실행 방법](docs/testing/README.md)에 현재 구성과 입력·기대 결과·확인 방법을 정리했다.
+자동 검증은 외부 모델/API 대신 고정 응답을 사용하며, Python 전체 회귀와 브라우저 기록 검증을 함께 실행한다.
+
+```bash
+npm ci
+npx playwright install chromium
+python scripts/run_cases.py suite
+python scripts/run_cases.py list
+python scripts/run_cases.py TC22
+```
+
+실행 로그·JUnit XML·커밋/환경/종료 코드 JSON은 `reports/`에 기록된다.
+A 입력·오류·승인 처리 개선 내용은 [실행기 보완 작업](docs/tasks/A-runtime-hardening.md)을 참고한다.

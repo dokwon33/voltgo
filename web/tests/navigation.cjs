@@ -24,7 +24,7 @@ const root = path.resolve(__dirname, '..');
     if (url.pathname === '/api/ask') {
      if (delay) await new Promise(resolve=>{release=resolve;});
      if (nextApproval) {
-      pending={approval_id:'request-1',expires_at:'2026-09-11T14:02:00+09:00',actions:[{name:'save_preferences',args:{category:'cafe'}}]};
+      pending={request_id:'request-1',expires_at:'2026-09-11T14:02:00+09:00',actions:[{name:'save_preferences',args:{category:'cafe'}}]};
       response={status:'awaiting_approval',message:'선호를 저장할까요?',candidates:[]}; nextApproval=false;
      } else response={status:'ok',message:'추천했어요.',candidates};
     }

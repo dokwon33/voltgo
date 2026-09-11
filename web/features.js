@@ -33,7 +33,7 @@ function acceptEnvelope(data) {
   currentMapData = data.map_data || {};
   session = data.session || {}; serverInstance = data.instance_id || serverInstance;
   if (data.instance_id) health.instance_id = data.instance_id;
-  pendingApproval = data.pending_approval || null; receivedAt = Date.now();
+  pendingApproval = data.pending_approval ? {...data.pending_approval, response: data.pending_response} : null; receivedAt = Date.now();
   if (history.state?.view === 'map' && !routeMap.selected) routeMap.overview(currentMapData);
   syncFeatures();
 }
@@ -180,7 +180,7 @@ async function restoreConversation(id) {
   routeMap.hide(); resetNavigation('chat');
   renderCar(session); renderStrip(session, lastRes); syncFeatures();
   if (archived) $('#follow').innerHTML = '<button type="button" id="archiveNew">새 대화로 추천받기</button>';
-  if (pendingApproval) openApproval(lastRes || {});
+  if (pendingApproval) openApproval(pendingApproval.response || lastRes || {});
   setLock(); scrollDown();
 }
 async function refreshVehicle() {

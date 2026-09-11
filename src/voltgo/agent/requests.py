@@ -73,6 +73,8 @@ def present_result(result, context):
         session.approval_requested_at = None
     response = assemble(result, context)
     response.request_id = request_id
+    if count:
+        request.prompt_response = response.model_copy(deep=True)
     return response
 
 

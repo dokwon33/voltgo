@@ -1,0 +1,341 @@
+[
+  {
+    "id": "TC01",
+    "title": "시간 예산 계산",
+    "design": "C001",
+    "owner": "B",
+    "input": "SoC 40→80%, 60kWh, 48kW, 원문 잔여시간 없음. 제한 30분·버퍼 5분.",
+    "expected": "완료 14:30, 복귀 마감 14:25, 가용 1,500초, energy_power.",
+    "check": "budget의 시각·초 값에 대한 assert 통과.",
+    "selectors": [
+      "tests/test_time_budget.py::test_c001_simple_estimate"
+    ],
+    "engine": "pytest"
+  },
+  {
+    "id": "TC02",
+    "title": "도구 전체 흐름",
+    "design": "C001 C002",
+    "owner": "A",
+    "input": "charging_ok(잔여 40분), 제한 30분, meal, 체류 12분, 후보 A/B/C.",
+    "expected": "A/B 추천, C 제외. A 확정 후 장소 출발 마감 14:20.",
+    "check": "confirmed.plan_id=A 및 데이터·시각 assert. 계획 선택은 추가 승인 없이 재검증 후 확정.",
+    "selectors": [
+      "tests/test_tools.py::test_c001_happy_path_and_confirm"
+    ],
+    "engine": "pytest"
+  },
+  {
+    "id": "TC03",
+    "title": "시간 경계와 선택 재검증",
+    "design": "C005 C006",
+    "owner": "D",
+    "input": "가용 1,500초에 총 소요 1,500/1,501초. 후보 A를 14:05에 재검증.",
+    "expected": "1,500초는 포함, 1,501초는 제외. A 복귀 14:26이 마감 14:25를 넘으면 거절.",
+    "check": "후보 목록과 recheck_plan 반환값 assert.",
+    "selectors": [
+      "tests/test_feasibility.py::test_c005_boundary_1500_vs_1501",
+      "tests/test_feasibility.py::test_c006_recheck_after_5_minutes"
+    ],
+    "engine": "pytest"
+  },
+  {
+    "id": "TC04",
+    "title": "충전 중단과 목표 도달",
+    "design": "C003",
+    "owner": "B",
+    "input": "charging=false 또는 현재 SoC=목표 80%. charging_done fixture.",
+    "expected": "NOT_CHARGING 또는 TARGET_REACHED. 장소 조회 없음.",
+    "check": "오류 코드 및 places_client.calls=0 assert.",
+    "selectors": [
+      "tests/test_time_budget.py::test_c003_not_charging",
+      "tests/test_tools.py::test_c003_not_charging_stops"
+    ],
+    "engine": "pytest"
+  },
+  {
+    "id": "TC05",
+    "title": "계산값 부족과 오래된 데이터",
+    "design": "C004",
+    "owner": "B",
+    "input": "평균 전력 0, 용량 또는 목표 None, 신선도 기준 시각에서 61초 경과.",
+    "expected": "값 부족은 NEED_INPUT, 61초 경과는 STALE_DATA.",
+    "check": "계산 코어의 NEED_INPUT·STALE_DATA assert. 실계정 API 호출은 별도 검증.",
+    "selectors": [
+      "tests/test_time_budget.py::test_c004_missing_values_need_input",
+      "tests/test_time_budget.py::test_stale_snapshot",
+      "tests/test_time_budget.py::test_missing_target_needs_input"
+    ],
+    "engine": "pytest"
+  },
+  {
+    "id": "TC06",
+    "title": "충전소 선택과 재검색",
+    "design": "C027",
+    "owner": "C",
+    "input": "Origin 없음, 역삼역 검색으로 S1/S2 반환, S2 선택. 새 검색이 빈 결과/오류인 경우도 실행.",
+    "expected": "선택 전 Origin=None. S2 선택 후 설정, 선택 시 API 재호출 없음. 실패한 새 검색은 옛 후보 제거.",
+    "check": "station_candidates·Origin·API 호출 수 assert.",
+    "selectors": [
+      "tests/test_tmap_places.py::test_find_station_multiple_asks_then_select",
+      "tests/test_tmap_places.py::test_failed_new_search_drops_old_candidates"
+    ],
+    "engine": "pytest"
+  },
+  {
+    "id": "TC07",
+    "title": "거리 필터와 충전 시간 단위",
+    "design": "C025 C026",
+    "owner": "B C",
+    "input": "장소 거리 500m 경계·600m, 중복 POI. 잔여시간 1 hour, 40 min, 90000 msec, 75 sec.",
+    "expected": "거리 초과·중복 제외. 단위별 3600/2400/90/75초로 정규화.",
+    "check": "필터 ID 목록과 정규화 초 값 assert. C025의 동일 1800초 네 입력과는 다른 표본.",
+    "selectors": [
+      "tests/test_place_policy.py::test_filter_drops_600m_and_dedupes",
+      "tests/test_place_policy.py::test_filter_500m_boundary",
+      "tests/test_clients_mock.py::test_remain_time_units"
+    ],
+    "engine": "pytest"
+  },
+  {
+    "id": "TC08",
+    "title": "TMAP 오류 구분",
+    "design": "C008 C009",
+    "owner": "C D",
+    "input": "FakeSession으로 401/403/429/503/400 및 timeout·connection error 주입.",
+    "expected": "401/403은 AUTH_ERROR·재시도 불가, 429/503/timeout은 재시도 가능 정보 보존.",
+    "check": "예외 code/retryable 보존. 경로 503·timeout 뒤 middleware 재시도 1회 및 실제 Fake HTTP 호출 수 assert.",
+    "selectors": [
+      "tests/test_tmap_places.py::test_error_mapping",
+      "tests/test_tmap_routes.py::test_retryable_route_error_is_preserved_and_middleware_retries",
+      "tests/test_tmap_routes.py::test_nonretryable_route_failures_do_not_retry"
+    ],
+    "engine": "pytest"
+  },
+  {
+    "id": "TC09",
+    "title": "경로 실패와 옛 후보 무효화",
+    "design": "C010",
+    "owner": "D",
+    "input": "A 복귀 경로 실패·B 성공. 기존 후보/확정 뒤 재조회 실패 또는 이동시간 증가.",
+    "expected": "A 제외·B 유지 및 partial warning. 옛 경로 기반 후보·확정 제거, 새 경로로 재선별 필요.",
+    "check": "Fake HTTP 호출, Session.routes/candidates/confirmed, 버전 및 선별 결과 assert.",
+    "selectors": [
+      "tests/test_feasibility.py::test_c010_missing_inbound_route_excluded",
+      "tests/test_tmap_routes.py::test_c010_inbound_failure_drops_only_that_candidate",
+      "tests/test_tools.py::test_route_refresh_failure_invalidates_previous_candidate",
+      "tests/test_tools.py::test_longer_refreshed_route_requires_reselection",
+      "tests/test_tools.py::test_route_refresh_invalidates_confirmed_plan"
+    ],
+    "engine": "pytest"
+  },
+  {
+    "id": "TC10",
+    "title": "조건 변경과 출력 검증",
+    "design": "C013 C011 C012",
+    "owner": "A D",
+    "input": "체류 12→20분 변경. 모델 후보 [A,X]. Mock 충전·장소·경로.",
+    "expected": "계획 버전 증가·옛 확정 해제. X 제거, 실제 후보명/마감 및 Mock 출처 표시.",
+    "check": "버전·confirmed·response.candidates·warnings assert.",
+    "selectors": [
+      "tests/test_tools.py::test_c013_dwell_change_bumps_version_and_drops_approval",
+      "tests/test_assembler.py::test_c012_unknown_candidate_dropped",
+      "tests/test_assembler.py::test_c011_mock_sources_are_visible"
+    ],
+    "engine": "pytest"
+  },
+  {
+    "id": "TC11",
+    "title": "선호 승인과 계획 확정 정책",
+    "design": "C002 C016",
+    "owner": "A E",
+    "input": "계획 A 선택. 별도 선호 저장 approve/reject. 저장 두 건에는 [approve,reject].",
+    "expected": "계획만 선택하면 즉시 재검증·확정. 저장은 승인 전 0회, 승인 후 1회. 저장 거절이 계획 확정을 막지 않음.",
+    "check": "승인 대상 목록·CALLS·실제 confirmed·선호 파일 assert.",
+    "selectors": [
+      "tests/test_approval.py::test_선호_저장은_승인_전에_실행되지_않고_승인_후_한_번만_실행된다",
+      "tests/test_approval.py::test_선호_저장을_거절하면_실행되지_않는다",
+      "tests/test_decide_entrypoint.py::test_계획_선택은_추가_승인_없이_재검증_후_확정된다",
+      "tests/test_decide_entrypoint.py::test_계획과_선호가_함께_와도_저장_거절은_계획_확정을_막지_않는다",
+      "tests/test_decide_entrypoint.py::test_결정을_리스트로_주면_저장_요청_순서대로_적용된다"
+    ],
+    "engine": "pytest"
+  },
+  {
+    "id": "TC12",
+    "title": "선호 승인 만료와 조건 변경",
+    "design": "C016",
+    "owner": "A E",
+    "input": "14:00 선호 요청 뒤 120/121초에 승인. 응답 전달 지연 또는 같은 배치의 계획 조건 변경도 주입.",
+    "expected": "120초 저장, 121초 APPROVAL_EXPIRED·저장 없음. 전달 지연·계획 변경은 만료를 연장하지 않음.",
+    "check": "실제 graph 승인 재개에서 120/121초 경계, ToolResult의 APPROVAL_EXPIRED 및 임시 선호 파일 유무 assert. 별도 복제 테스트는 사용하지 않음.",
+    "selectors": [
+      "tests/test_decide_entrypoint.py::test_실제_승인_재개에서_120초_경계를_검증한다",
+      "tests/test_request_idempotency.py::test_delayed_result_delivery_does_not_extend_approval_deadline",
+      "tests/test_request_idempotency.py::test_condition_change_in_same_batch_cannot_bypass_save_expiry"
+    ],
+    "engine": "pytest"
+  },
+  {
+    "id": "TC13",
+    "title": "승인 재전송과 내용 충돌",
+    "design": "C017",
+    "owner": "A",
+    "input": "같은 ID/approve 재전송, 같은 ID/reject로 변경. cafe와 체류 15분 동시 저장 뒤 재전송.",
+    "expected": "동일 요청은 기존 응답. 다른 결정은 REQUEST_ID_CONFLICT. 쓰기 재실행 없음.",
+    "check": "단건 쓰기 1회, 두 필드 저장은 총 2회 이후 증가 없음. 응답 사본·파일의 두 필드·카운터 assert.",
+    "selectors": [
+      "tests/test_request_idempotency.py::test_same_request_reuses_saved_result_without_model_or_tool_calls",
+      "tests/test_request_idempotency.py::test_same_request_different_decision_is_rejected_without_another_write",
+      "tests/test_request_idempotency.py::test_mixed_plan_and_save_replay_does_not_repeat_either_write",
+      "tests/test_request_idempotency.py::test_multiple_preference_fields_survive_batch_approval_and_replay",
+      "tests/test_decide_entrypoint.py::test_복수_저장을_모두_승인하면_두_필드가_모두_남는다"
+    ],
+    "engine": "pytest"
+  },
+  {
+    "id": "TC14",
+    "title": "새 승인 시각과 후속 요청",
+    "design": "C016 C017",
+    "owner": "A",
+    "input": "첫 선호 승인 3분 후 새 저장 요청. 재개 중 새 저장 승인 생성 뒤 자체 120/121초 경계 검증.",
+    "expected": "새 ID와 새 승인 시각 발급. 이전 요청 재전송이 다음 승인을 실행하지 않음.",
+    "check": "새 ID·시각·저장 횟수 및 만료 결과 assert. 과거 ID는 후속 승인을 소비하지 않음.",
+    "selectors": [
+      "tests/test_request_idempotency.py::test_new_approval_after_saved_preference_uses_its_own_start_time",
+      "tests/test_request_idempotency.py::test_new_interrupt_gets_new_id_and_old_replay_does_not_consume_it",
+      "tests/test_request_idempotency.py::test_followup_approval_during_resume_has_its_own_ttl"
+    ],
+    "engine": "pytest"
+  },
+  {
+    "id": "TC15",
+    "title": "사용자와 Session 격리",
+    "design": "C015 C017",
+    "owner": "A E",
+    "input": "동일 thread 이름을 쓰는 u1/u2. 타 대화·타 사용자 또는 새 Session으로 승인 시도.",
+    "expected": "요청과 선호 분리. 잘못된 사용은 UNKNOWN_REQUEST_ID/SESSION_SCOPE_MISMATCH/SESSION_NOT_RESTORED.",
+    "check": "오류 코드와 사용자별 쓰기 기록 assert.",
+    "selectors": [
+      "tests/test_request_idempotency.py::test_different_users_with_same_thread_name_have_independent_requests",
+      "tests/test_request_idempotency.py::test_session_cannot_be_reused_for_another_user_or_thread",
+      "tests/test_request_idempotency.py::test_new_session_cannot_resume_old_checkpoint"
+    ],
+    "engine": "pytest"
+  },
+  {
+    "id": "TC16",
+    "title": "선호 보관과 삭제",
+    "design": "C014 C015 C018",
+    "owner": "E",
+    "input": "u1 선호 저장 후 새 프로세스의 u1/u2 조회·삭제. 저장/교체 실패도 주입.",
+    "expected": "u1만 복원·삭제. 실패하면 기존 기록 보존 및 임시 파일 제거, 다른 사용자 선호 유지.",
+    "check": "subprocess 출력과 임시 선호 파일/조회 결과 assert. 실제 사용자 파일은 사용하지 않음.",
+    "selectors": [
+      "tests/test_memory_budget.py::test_새_프로세스에서도_저장한_선호가_복원된다",
+      "tests/test_memory_budget.py::test_새_프로세스에서도_다른_사용자_선호는_안_보인다",
+      "tests/test_memory_budget.py::test_본인_삭제가_다른_사용자_기록을_지우지_않는다",
+      "tests/test_memory_budget.py::test_저장_실패시_이전_기록을_보존하고_임시파일을_정리한다"
+    ],
+    "engine": "pytest"
+  },
+  {
+    "id": "TC17",
+    "title": "모델 한도와 쓰기 이후 실패",
+    "design": "C021 C017",
+    "owner": "A E",
+    "input": "마지막 모델 호출 timeout. 승인 재개 시 한도 소진. 선호 저장 후 모델 오류.",
+    "expected": "허용 한도를 넘는 모델 실행 없음. LIMIT_EXCEEDED 응답. 쓰기 후 실패 재전송은 저장 반복 없음.",
+    "check": "handler 호출 수·LIMIT_EXCEEDED·APPROVAL_EXECUTION_FAILED 및 저장 1회 assert.",
+    "selectors": [
+      "tests/test_memory_budget.py::test_마지막_호출에서_일시_오류가_나도_한도를_넘기지_않는다",
+      "tests/test_decide_entrypoint.py::test_재개_중_모델_한도에_걸리면_오류_응답으로_돌려준다",
+      "tests/test_request_idempotency.py::test_failure_after_write_is_cached_instead_of_retrying_write"
+    ],
+    "engine": "pytest"
+  },
+  {
+    "id": "TC18",
+    "title": "차량 목표 유지와 확정 재검증",
+    "design": "C028",
+    "owner": "B E",
+    "input": "차량 목표 80%에 대화로 60%/100% 변경 시도, 원문 목표와 구형 override 충돌, 확정 전 차량 목표 90% 갱신.",
+    "expected": "대화로 차량 목표를 변경하지 않음. 시간 제한만 별도 반영하며 확정 시 차량 최신 목표를 재조회. 목표 미확인은 NEED_INPUT.",
+    "check": "차량 snapshot·예산 마감·도구 입력 스키마·강제 조회 결과 assert.",
+    "selectors": [
+      "tests/test_vehicle_target.py"
+    ],
+    "engine": "pytest"
+  },
+  {
+    "id": "TC19",
+    "title": "검색 반경과 캐시 재사용",
+    "design": "추가 회귀",
+    "owner": "C",
+    "input": "500m 검색 후 1000m로 확대, 업종·출발지 변경, 실패 뒤 재검색.",
+    "expected": "같은 1km 원본의 재필터는 API 추가 호출 없음. 업종·출발지 변경 시 별도 조회, 오류는 캐시하지 않음.",
+    "check": "Mock 클라이언트 호출 수와 Session 캐시·후보 목록 assert.",
+    "selectors": [
+      "tests/test_tmap_places.py::test_widen_reuses_fetched_list",
+      "tests/test_tmap_places.py::test_other_category_still_calls_api",
+      "tests/test_tmap_places.py::test_origin_change_drops_cache",
+      "tests/test_tmap_places.py::test_failed_search_is_not_cached",
+      "tests/test_latest_main_integration.py"
+    ],
+    "engine": "pytest"
+  },
+  {
+    "id": "TC20",
+    "title": "시간 부족 대체 활동과 사용자 선택",
+    "design": "추가 회귀",
+    "owner": "D",
+    "input": "식사 시간이 부족한 첫 턴 뒤 편의점 동의·거절·불명확 응답·명시 업종·새 시간 조건을 각각 입력.",
+    "expected": "첫 턴 자동 재검색 없음. 사용자 다음 응답 후 선택 업종을 한 번 재계획. 경로 오류를 시간 부족으로 오판하지 않음.",
+    "check": "PR10의 실제 graph 회귀 16개: 도구 호출 기록, reason, 후보, 사용자 조건, Session 불변 검증.",
+    "selectors": [
+      "tests/test_alternative_agent.py"
+    ],
+    "engine": "pytest"
+  },
+  {
+    "id": "TC21",
+    "title": "웹 세션과 승인 재전송",
+    "design": "추가 회귀",
+    "owner": "A",
+    "input": "같은 IP의 두 쿠키 저장소, 타 대화 ID, 동일 승인 재전송·결정 변경·거절 사유 변경·저장 후 모델 실패.",
+    "expected": "타 사용자/대화 접근 404. 같은 request_id/결정은 200과 기존 response, 충돌은 409. 새 승인 대기는 유지.",
+    "check": "실제 HTTP 파서와 HITL, 임시 선호 쓰기 수·응답 동일성·pending_response·쿠키 만료 assert.",
+    "selectors": [
+      "tests/test_web.py"
+    ],
+    "engine": "pytest"
+  },
+  {
+    "id": "TC22",
+    "title": "A 실행기 오류와 전체 연결",
+    "design": "추가 회귀",
+    "owner": "A",
+    "input": "빈 입력·501자·가짜 키, 모델 timeout 2회/일반 오류, 충전소 검색과 반경 확대를 포함한 대체 추천, 이후 저장·재전송.",
+    "expected": "거부 입력 checkpoint 0건. 오류는 AGENT_EXECUTION_FAILED로 정리하고 다음 턴 복구. 실제 모델 8회 내 시간 부족 안내 완료.",
+    "check": "checkpoint 이력·모델 실제 호출 수·응답 상태·비밀값 비노출·저장 횟수·대체 추천 이후 승인 계약 assert.",
+    "selectors": [
+      "tests/test_runtime.py"
+    ],
+    "engine": "pytest"
+  },
+  {
+    "id": "TC23",
+    "title": "브라우저 기록과 승인 화면 복원",
+    "design": "추가 회귀",
+    "owner": "A",
+    "input": "거부 입력, 이전 승인 결과 재전송 중 새 승인 대기, 화면 새로고침, 새 대화와 보관 기록 복원.",
+    "expected": "거부 입력은 localStorage에 저장하지 않음. request_id와 새 승인 내용 유지. 새 대화는 분리하고 기존 기록은 이어서 조회.",
+    "check": "Playwright가 실제 app.js·features.js를 실행. localStorage·DOM·POST 본문·대화 ID assert.",
+    "selectors": [
+      "web/tests/runtime.cjs",
+      "web/tests/features.cjs",
+      "web/tests/new-chat.cjs"
+    ],
+    "engine": "node"
+  }
+]

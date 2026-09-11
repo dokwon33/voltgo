@@ -168,8 +168,8 @@
   }
   function scrollDown() { const m = $('#messages'); m.scrollTop = m.scrollHeight; }
 
-  function addMe(text) {
-    recordTurn({role: 'user', text});
+  function addMe(text, record = true) {
+    if (record) recordTurn({role: 'user', text});
     $('#messages').insertAdjacentHTML('beforeend', `<div class="row me"><div class="say"><p>${esc(text)}</p></div></div>`);
     scrollDown();
   }
@@ -374,7 +374,7 @@
     if (state.view === 'panel') openFeature(state.panelMode, false);
     if (state.view === 'info') renderInfo();
     if (state.view === 'approval') {
-      if (pendingApproval) openApproval(lastRes || {}, false);
+      if (pendingApproval) openApproval(pendingApproval.response || lastRes || {}, false);
       else { navigateTo(base?.view || 'chat', {mapKey: base?.mapKey, replace: true}); return; }
     }
     setLock();
@@ -440,18 +440,21 @@
     if (!text || busy || archived || pendingApproval || !$('#approval').hidden) return;
     // 홈에서 시작하는 요청은 새 대화다. 기존 대화는 기록에 보관한다.
     if (!$('#home').hidden && timeline.length) goHome({loadSession: false});
-    showChat(); addMe(text); $('#input').value = '';
+    showChat(); addMe(text, false); $('#input').value = '';
     busy = true; setLock(); setMood('busy'); addTyping();
     try {
       const d = await api('/api/ask', { thread_id: await ensureThread(), text, selection });
+      recordTurn({role: 'user', text});
       acceptEnvelope(d); lastRes = d.response; renderCar(session);
       removeTyping(); renderStrip(session, d.response); addBot(d.response, d.map_data);
+      if (pendingApproval && !$('#chat').hidden && !overlayViews.has(history.state?.view))
+        openApproval(pendingApproval.response || lastRes || {});
     } catch (e) { removeTyping(); addError(e.message); }
     finally { busy = false; setLock(); saveConversation(); }
   }
 
   async function decideNow(decision) {
-    if (busy || (decision === 'approve' && approvalExpired())) return;
+    if (busy || !pendingApproval?.request_id || (decision === 'approve' && approvalExpired())) return;
     const label = decision === 'approve' ? $('#approve').textContent : $('#reject').textContent;
     busy = true; setLock();
     if (history.state?.view === 'approval') await goBack();
@@ -459,10 +462,12 @@
     addMe(label);
     busy = true; setLock(); setMood('busy'); addTyping();
     try {
-      const d = await api('/api/decide', { thread_id: threadId, decision, approval_id: pendingApproval?.approval_id });
+      const d = await api('/api/decide', { thread_id: threadId, decision, request_id: pendingApproval?.request_id });
       acceptEnvelope(d); lastRes = d.response; renderCar(session);
       removeTyping(); renderStrip(session, d.response); addBot(d.response, d.map_data);
-    } catch (e) { removeTyping(); addError(e.message); if (pendingApproval) openApproval(lastRes || {}); }
+      if (pendingApproval && !$('#chat').hidden && !overlayViews.has(history.state?.view))
+        openApproval(pendingApproval.response || lastRes || {});
+    } catch (e) { removeTyping(); addError(e.message); if (pendingApproval) openApproval(pendingApproval.response || lastRes || {}); }
     finally { busy = false; setLock(); saveConversation(); }
   }
 
@@ -495,7 +500,7 @@
   });
   $('#approve').addEventListener('click', () => decideNow('approve'));
   $('#reject').addEventListener('click', () => decideNow('reject'));
-  $('#pendingReview').addEventListener('click', () => openApproval(lastRes || {}));
+  $('#pendingReview').addEventListener('click', () => openApproval(pendingApproval.response || lastRes || {}));
   $('#homeVolty').addEventListener('click', (e) => {          // 누르면 다시 인사
     const volty = e.currentTarget;
     volty.classList.remove('greet'); void volty.offsetWidth; volty.classList.add('greet');

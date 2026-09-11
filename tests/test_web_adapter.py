@@ -108,12 +108,13 @@ def test_approval_sheet_shows_what_will_be_saved_and_runs_once(web):
     tid = browser.conversation()
     status, data = browser.request("POST", "/api/ask", {"thread_id": tid, "text": "카페 취향 기억해줘"})
     pending = data["pending_approval"]
-    assert status == 200 and pending["approval_id"] == data["approval_id"]
+    assert status == 200 and pending["request_id"] == data["request_id"]
     assert pending["actions"][0]["args"]["dwell_min"] == 15
     assert pending["expires_at"]
-    body = {"thread_id": tid, "decision": "approve", "approval_id": pending["approval_id"]}
+    body = {"thread_id": tid, "decision": "approve", "request_id": pending["request_id"]}
     status, data = browser.request("POST", "/api/decide", body)
     assert status == 200 and data["session"]["preferences"]["preferred_category"] == "cafe"
     assert data["pending_approval"] is None
-    assert browser.request("POST", "/api/decide", body)[0] == 404   # 같은 승인 ID 는 다시 실행하지 않는다
+    replay_status, replay = browser.request("POST", "/api/decide", body)
+    assert replay_status == 200 and replay["response"] == data["response"]
     assert memory.load_preferences(browser.user_id).dwell_min == 15

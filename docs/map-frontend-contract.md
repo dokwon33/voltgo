@@ -96,6 +96,3 @@ window.VOLTGO_MAP_CONFIG = { appKey: '브라우저 지도용 앱 키' };
 - `전체 보기`는 선택한 장소·충전소·현재 표시한 경로를 화면에 맞춘다.
 - 새 응답은 이전 좌표를 재사용하지 않는다. 이전 카드는 해당 응답의 좌표를 유지한다.
 - `처음으로`는 지도 선택과 저장한 지도 데이터를 초기화한다.
-
-공식 참고: [TMAP JavaScript SDK 가이드](https://tmapapi.tmapmobility.com/main.html),
-[경로 응답 예제](https://tmap-skopenapi.readme.io/reference/경로안내-샘플예제).

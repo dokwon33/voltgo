@@ -14,9 +14,9 @@ from langchain.chat_models import init_chat_model
 from langgraph.checkpoint.memory import InMemorySaver
 
 from voltgo.agent.approval import approval_middleware, mark_approval_requested, resume_command
-from voltgo.agent.assembler import error_response
+from voltgo.agent.assembler import error_response, exhausted_alternative_response
 from voltgo.agent.middleware import (
-    input_validation, model_budget, output_integrity, preference_prompt, tool_policy,
+    input_rejection, input_validation, model_budget, output_integrity, preference_prompt, tool_policy,
 )
 from voltgo.agent.prompts import SYSTEM_PROMPT
 from voltgo.agent.requests import (
@@ -69,14 +69,30 @@ def ask(agent, text: str, context: Context, thread_id: str) -> VoltGoResponse:
     scope_error = bind_session(agent, context, thread_id)
     if scope_error is not None:
         return scope_error
+    # before_agent는 checkpoint 기록 뒤 실행된다. 거부한 원문은 invoke 전에 차단한다.
+    rejection = input_rejection(text)
+    if rejection:
+        return VoltGoResponse(status="need_input", message=rejection,
+                              generated_at=context.clock(), missing_fields=["intent"])
+    if context.session.pending_request_id:
+        return request_error(context, context.session.pending_request_id, "PENDING_APPROVAL",
+                             "대기 중인 선호 저장을 먼저 승인하거나 거절해 주세요.")
+    config = config_for(context.user_id, thread_id)
     try:
         result = agent.invoke({"messages": [{"role": "user", "content": text}]},
-                              config_for(context.user_id, thread_id), context=context)
-    except RuntimeError as e:
-        if str(e) == "MODEL_BUDGET_EXCEEDED":
+                              config, context=context)
+        return present_result(result, context)
+    except Exception as e:
+        if isinstance(e, RuntimeError) and str(e) == "MODEL_BUDGET_EXCEEDED":
+            # PR10의 검증된 마지막 도구 결과만 코드로 표현한다. 모델/API 한도는 유지한다.
+            response = exhausted_alternative_response(agent.get_state(config).values, context)
+            if response is not None:
+                logger.info("Alternative response assembled after model budget exhaustion")
+                return response
             return error_response(context, "LIMIT_EXCEEDED", "모델 호출 한도(8회)에 도달해 중단했습니다.")
-        raise
-    return present_result(result, context)
+        logger.error("Agent execution failed: type=%s", type(e).__name__)
+        return error_response(context, "AGENT_EXECUTION_FAILED",
+                              "응답 처리 중 오류가 발생했습니다. 실행 결과를 확인한 뒤 다시 질문해 주세요.")
 
 
 def decide(agent, decision, context: Context, thread_id: str, reason: str = "",
