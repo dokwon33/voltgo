@@ -59,3 +59,21 @@ def filter_places(places: list[Place], origin: Origin, max_dist_m: int = 500,
 def dwell_sec_for(category: str, override_min=None) -> int:
     minutes = override_min if override_min is not None else DWELL_DEFAULT_MIN[category]
     return int(minutes) * 60
+
+
+# 남은 시간으로 반경 정하기 (팀 정책값. 실측이 아니다)
+WALK_M_PER_MIN = 70        # 성인 보행 약 4.2km/h
+DETOUR_FACTOR = 1.3        # 실제 보행거리 ≈ 직선거리 x 1.3 (역삼 실측 1건은 지하주차장이라 4.5배였음)
+
+
+def auto_max_dist_m(available_sec: int, dwell_sec: int) -> int:
+    """
+    남은 시간으로 직선거리 필터 반경(m)을 정한다.
+      편도 가능 시간 = (가용 - 체류) / 2
+      반경          = 편도 가능 시간 x 보행 속도 / 우회 보정
+    500m 아래로는 줄이지 않는다. 체류 기본값으로 줄이면 사용자가 나중에 체류를 짧게 말했을 때
+    갈 수 있던 곳이 이미 빠져 있다. 넓히는 것만 한다 (최대 1000m). 최종 판정은 보행 경로가 한다.
+    """
+    one_way_min = max(available_sec - dwell_sec, 0) / 2 / 60
+    reach_m = one_way_min * WALK_M_PER_MIN / DETOUR_FACTOR
+    return int(round(min(max(reach_m, DEFAULT_DIST_M), MAX_DIST_M), -1))
