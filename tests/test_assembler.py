@@ -1,5 +1,8 @@
 # 담당 A - 출력 조립 (C011 출처 표시, C012 허위 ID 제거)
+from datetime import timedelta
 from types import SimpleNamespace
+
+import pytest
 
 from voltgo.agent import tools
 from voltgo.agent.assembler import assemble
@@ -49,3 +52,15 @@ def test_interrupt_becomes_awaiting_approval(context):
     assert resp.candidates == []
     assert "cafe" in resp.message
     assert "approve" in resp.message
+
+
+@pytest.mark.parametrize(("elapsed_min", "expected_min"), [(5, 20), (30, 0)])
+def test_available_time_display_uses_current_time_and_never_goes_negative(context, elapsed_min, expected_min):
+    _run_pipeline(context)
+    computed_at = context.session.time_budget.computed_at
+    context.clock = lambda: computed_at + timedelta(minutes=elapsed_min)
+    decision = ModelDecision(candidate_ids=[], next_action="clarify", explanation="확인 중입니다.")
+
+    resp = assemble({"structured_response": decision, "messages": []}, context)
+
+    assert f"가용 {expected_min}분" in resp.message
