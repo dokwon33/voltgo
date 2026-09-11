@@ -43,8 +43,9 @@ def test_clarify_gives_missing_fields(context):
 
 def test_interrupt_becomes_awaiting_approval(context):
     _run_pipeline(context)
-    interrupt = SimpleNamespace(value={"action_requests": [{"name": "confirm_plan", "args": {"plan_id": "A", "version": 1}}]})
+    interrupt = SimpleNamespace(value={"action_requests": [{"name": "save_preferences", "args": {"category": "cafe"}, "description": "선호를 저장할까요? (category=cafe)"}]})
     resp = assemble({"__interrupt__": [interrupt], "messages": []}, context)
     assert resp.status == "awaiting_approval"
-    assert resp.candidates[0].plan_id == "A"
+    assert resp.candidates == []
+    assert "cafe" in resp.message
     assert "approve" in resp.message
