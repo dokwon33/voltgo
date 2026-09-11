@@ -4,9 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>VoltGo</title>
-<link rel="stylesheet" href="map.css">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@900&family=Gowun+Dodum&family=Noto+Sans+KR:wght@400;500;700&family=Hi+Melody&display=swap">
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+<link rel="stylesheet" href="map.css?v=20260911-map-live">
+<link rel="stylesheet" href="volty.css?v=20260911-smooth16">
+<link rel="preload" href="fonts/gowun-dodum.woff2" as="font" type="font/woff2" crossorigin>
 <style>
+  @font-face { font-family: 'Gowun Dodum'; font-style: normal; font-weight: 400; font-display: swap; src: url('fonts/gowun-dodum.woff2') format('woff2'); }
+  @font-face { font-family: 'Nunito'; font-style: normal; font-weight: 800; font-display: swap; src: url('fonts/nunito-800.woff2') format('woff2'); }
+  @font-face { font-family: 'Nunito'; font-style: normal; font-weight: 900; font-display: swap; src: url('fonts/nunito-900.woff2') format('woff2'); }
   :root {
     color-scheme: light;
     --bg: #F4F9F5; --paper: #FFFFFF; --soft: #EAF5EE; --line: #DCE9E0;
@@ -15,10 +20,10 @@
     --amber: #B9801A; --amber-soft: #FFF3DA; --red: #C4503E;
     --me: #1B2620; --me-ink: #F4F9F5;
     --shadow: 0 12px 32px rgba(40, 90, 60, .10);
-    --ui: "Noto Sans KR", "Apple SD Gothic Neo", system-ui, sans-serif;
+    --ui: "Gowun Dodum", "Apple SD Gothic Neo", system-ui, sans-serif;
     --voice: "Gowun Dodum", "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif;
     --logo: "Nunito", system-ui, sans-serif;
-    --hand: "Hi Melody", "Gowun Dodum", cursive;
+    --hand: "Gowun Dodum", "Apple SD Gothic Neo", sans-serif;
   }
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }
@@ -41,34 +46,44 @@
   .wordmark b { color: var(--green); }
   .wordmark svg { width: 13px; height: 17px; margin: -8px 0 0 1px; }
   .bar-right { display: flex; gap: 6px; }
+  .bar { gap: 6px; }
+  .bar .wordmark { margin-right: auto; }
+  @media (max-width: 360px) {
+    .bar { padding-inline: 12px; gap: 4px; }
+    .bar .wordmark { font-size: 20px; }
+    .bar-right { gap: 4px; }
+    .bar .icon-btn { width: 30px; height: 30px; flex: none; }
+    .bar .text-btn { font-size: 12px; padding-inline: 2px; }
+  }
   .icon-btn { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line); background: var(--paper); display: grid; place-content: center; padding: 0; }
   .icon-btn svg { width: 16px; height: 16px; stroke: var(--ink-2); fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  #backBtn { background: transparent; border-color: #D8DDDA; box-shadow: none; }
+  #backBtn svg { stroke: #68756D; }
+  #backBtn:hover { border-color: #BCC5BF; }
   .text-btn { border: 0; background: none; color: var(--ink-3); font-size: 13px; padding: 4px 6px; }
 
   /* ---------- 홈 ---------- */
   .home { flex: 1; padding: 6px 20px 24px; display: flex; flex-direction: column; gap: 18px; }
   .hero { display: flex; flex-direction: column; align-items: center; text-align: center; padding-top: 6px; }
   .volty { width: 240px; display: block; filter: drop-shadow(0 22px 26px var(--glow)); transform-origin: 50% 82%; }
-  /* 첫 화면 인사 : 튀어나오고 -> 손 흔들고 -> 둥실 */
-  .volty.greet { cursor: pointer; animation: pop .7s cubic-bezier(.2, 1.4, .4, 1) both, wave 1.5s ease-in-out .7s 1, float 4.5s ease-in-out 2.2s infinite; }
   @keyframes pop { from { transform: scale(.5) rotate(-10deg); opacity: 0; } to { transform: none; opacity: 1; } }
-  @keyframes wave { 0%, 100% { transform: rotate(0); } 18% { transform: rotate(-7deg) translateY(-6px); } 38% { transform: rotate(7deg) translateY(-6px); }
-                    58% { transform: rotate(-6deg) translateY(-4px); } 78% { transform: rotate(5deg) translateY(-2px); } }
-  @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-9px); } }
-  @media (prefers-reduced-motion: reduce) { .volty, .volty.greet { animation: none; } }
+  @media (prefers-reduced-motion: reduce) { .sheet .volty { animation: none; } }
   .hero-say { position: relative; margin-top: 10px; background: var(--paper); border-radius: 20px; padding: 12px 18px;
-              font-family: var(--voice); font-size: 17px; line-height: 1.45; color: var(--ink); box-shadow: var(--shadow); text-wrap: balance; }
+              font-family: var(--voice); font-size: 16px; line-height: 1.6; color: var(--ink); box-shadow: var(--shadow); text-wrap: balance; word-break: keep-all; }
   .hero-say::before { content: ""; position: absolute; top: -8px; left: calc(50% - 8px); width: 16px; height: 16px; background: var(--paper); transform: rotate(45deg); border-radius: 3px; }
-  .hand { margin: 12px 0 0; font-family: var(--hand); font-size: 21px; color: var(--deep); letter-spacing: .01em; }
+  .hand { margin: 12px 0 0; font-family: var(--hand); font-size: 14px; color: var(--ink-2); letter-spacing: -.02em; }
 
   .car { background: var(--paper); border-radius: 20px; padding: 14px 16px; box-shadow: var(--shadow); }
   .car-main { display: flex; align-items: center; gap: 14px; }
-  .car-times { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line); }
+  .car-times { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line); }
   .car-times span { display: block; font-size: 12px; color: var(--ink-2); }
   .car-times b { font-size: 21px; font-weight: 700; }
-  .car-note { margin: 10px 0 0; font-size: 12.5px; color: var(--ink-3); }
+  .car-dialog { border: 0; padding: 0; width: min(430px, calc(100% - 24px)); border-radius: 24px; background: var(--paper); color: var(--ink); }
+  .car-dialog::backdrop { background: rgba(27, 38, 32, .3); backdrop-filter: blur(5px); }
+  .car-dialog .sheet { border-radius: 24px; padding: 22px; box-shadow: none; }
+  .car-dialog .car { width: 100%; text-align: left; padding: 10px 0; box-shadow: none; }
   .ring { --soc: 0; flex: none; width: 66px; aspect-ratio: 1; border-radius: 50%; position: relative;
-          background: conic-gradient(var(--green) calc(var(--soc) * 1%), var(--soft) 0); }
+          background: conic-gradient(var(--battery-ring, var(--green)) calc(var(--soc) * 1%), var(--soft) 0); }
   .ring::before { content: ""; position: absolute; inset: 7px; border-radius: 50%; background: var(--paper); }
   .ring b { position: absolute; inset: 0; display: grid; place-content: center; font-size: 16px; font-weight: 700; }
   .car-text { display: flex; flex-direction: column; min-width: 0; }
@@ -166,13 +181,23 @@
   .info-list span { color: var(--ink-3); flex: none; }
   .info-list b { font-weight: 500; text-align: right; overflow-wrap: anywhere; }
 </style>
+<link rel="stylesheet" href="battery.css">
+<link rel="stylesheet" href="features.css">
 </head>
 <body>
 <div class="phone">
   <header class="bar">
-    <span class="wordmark">Volt<b>Go</b><svg viewBox="0 0 18 22" aria-hidden="true"><path d="M11 0 1 12h6l-2 10L17 8h-6z" fill="#9BDC5B"/></svg></span>
+    <button class="icon-btn" id="backBtn" type="button" aria-label="뒤로가기" hidden>
+      <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>
+    </button>
+    <button class="wordmark" id="brandHome" type="button" aria-label="VoltGo 홈으로">Volt<b>Go</b><svg viewBox="0 0 18 22" aria-hidden="true"><path d="M11 0 1 12h6l-2 10L17 8h-6z" fill="#9BDC5B"/></svg></button>
     <div class="bar-right">
-      <button class="text-btn" id="homeBtn" type="button" hidden>처음으로</button>
+      <button class="icon-btn" id="mapBtn" type="button" aria-label="추천 지도 보기" title="추천 지도">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 5 6-2 6 2 6-2v16l-6 2-6-2-6 2zM9 3v16M15 5v16"/></svg>
+      </button>
+      <button class="icon-btn" id="carBtn" type="button" aria-label="차량 상태 보기" title="차량 상태">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 10 2-6h10l2 6M5 10h14a2 2 0 0 1 2 2v6H3v-6a2 2 0 0 1 2-2ZM5 18v2M19 18v2M7 14h1M16 14h1"/></svg>
+      </button>
       <button class="icon-btn" id="infoBtn" type="button" aria-label="실행 정보">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>
       </button>
@@ -182,28 +207,116 @@
   <!-- 홈 : 볼티가 먼저 인사한다 -->
   <section class="home" id="home">
     <div class="hero">
-      <img class="volty greet" id="homeVolty" src="img/volty_hello.png" alt="볼티" title="볼티를 누르면 다시 인사해요">
-      <div class="hero-say">지금 충전 좋으시죠?<br>근처에 다녀올 수 있는 좋은 곳을 찾아볼게요!</div>
+      <button class="volty greet" id="homeVolty" type="button" aria-label="볼티가 손을 흔들며 인사해요. 다시 인사하기" title="볼티를 누르면 다시 인사해요">
+        <span class="volty-ambient" aria-hidden="true">
+          <svg viewBox="0 0 480 480" focusable="false">
+            <defs>
+              <clipPath id="volty-ambient-shadow-clip"><rect y="390" width="480" height="90"/></clipPath>
+              <radialGradient id="volty-glitter-feather">
+                <stop offset="0" stop-color="white"/><stop offset=".35" stop-color="white"/><stop offset="1" stop-color="black"/>
+              </radialGradient>
+              <radialGradient id="volty-ambient-glow">
+                <stop offset="0" stop-color="#BFF0D5" stop-opacity=".3"/><stop offset="1" stop-color="#BFF0D5" stop-opacity="0"/>
+              </radialGradient>
+              <mask id="volty-glitter-mask-0" maskUnits="userSpaceOnUse" x="0" y="0" width="480" height="480" style="mask-type: luminance">
+                <rect width="480" height="480" fill="black"/>
+                <circle cx="116" cy="140" r="22" fill="url(#volty-glitter-feather)"/>
+              </mask>
+              <mask id="volty-glitter-mask-1" maskUnits="userSpaceOnUse" x="0" y="0" width="480" height="480" style="mask-type: luminance">
+                <rect width="480" height="480" fill="black"/>
+                <circle cx="90" cy="202" r="13" fill="url(#volty-glitter-feather)"/>
+              </mask>
+              <mask id="volty-glitter-mask-2" maskUnits="userSpaceOnUse" x="0" y="0" width="480" height="480" style="mask-type: luminance">
+                <rect width="480" height="480" fill="black"/>
+                <circle cx="78" cy="267" r="22" fill="url(#volty-glitter-feather)"/>
+              </mask>
+              <mask id="volty-glitter-mask-3" maskUnits="userSpaceOnUse" x="0" y="0" width="480" height="480" style="mask-type: luminance">
+                <rect width="480" height="480" fill="black"/>
+                <circle cx="394" cy="305" r="18" fill="url(#volty-glitter-feather)"/>
+              </mask>
+              <mask id="volty-glitter-mask-4" maskUnits="userSpaceOnUse" x="0" y="0" width="480" height="480" style="mask-type: luminance">
+                <rect width="480" height="480" fill="black"/>
+                <circle cx="374" cy="348" r="23" fill="url(#volty-glitter-feather)"/>
+              </mask>
+            </defs>
+            <g class="volty-ground-shadow">
+              <image href="img/volty_hello.png" width="480" height="480" clip-path="url(#volty-ambient-shadow-clip)"/>
+            </g>
+            <g class="volty-activity-glitter">
+              <ellipse class="volty-ambient-glow" cx="240" cy="252" rx="240" ry="174" fill="url(#volty-ambient-glow)"/>
+              <g class="volty-glitter"><image href="img/volty_hello.png" width="480" height="480" mask="url(#volty-glitter-mask-0)"/></g>
+              <g class="volty-glitter"><image href="img/volty_hello.png" width="480" height="480" mask="url(#volty-glitter-mask-1)"/></g>
+              <g class="volty-glitter"><image href="img/volty_hello.png" width="480" height="480" mask="url(#volty-glitter-mask-2)"/></g>
+              <g class="volty-glitter"><image href="img/volty_hello.png" width="480" height="480" mask="url(#volty-glitter-mask-3)"/></g>
+              <g class="volty-glitter"><image href="img/volty_hello.png" width="480" height="480" mask="url(#volty-glitter-mask-4)"/></g>
+            </g>
+          </svg>
+        </span>
+        <svg viewBox="0 0 480 480" aria-hidden="true" focusable="false">
+          <defs>
+            <!-- Move the original sparkles to the shared animated ambient layer. -->
+            <radialGradient id="volty-glitter-cutout">
+              <stop offset="0" stop-color="black"/><stop offset=".35" stop-color="black"/><stop offset="1" stop-color="white"/>
+            </radialGradient>
+            <!-- Hide the baked-in arm and lights; retain the original face and ring. -->
+            <mask id="volty-still-mask" maskUnits="userSpaceOnUse" x="0" y="0" width="480" height="480" style="mask-type: luminance">
+              <rect width="480" height="480" fill="white"/>
+              <path d="M378 218 C398 202 417 192 430 204 C450 228 425 285 367 308 C375 280 383 247 378 218Z" fill="black"/>
+              <g fill="url(#volty-glitter-cutout)"><circle cx="116" cy="140" r="22"/><circle cx="90" cy="202" r="13"/><circle cx="78" cy="267" r="22"/><circle cx="394" cy="305" r="18"/><circle cx="374" cy="348" r="23"/></g>
+            </mask>
+            <!-- Fixed body silhouette occludes the arm, without dimming it under the baked-in glow. -->
+            <mask id="volty-arm-depth-mask" maskUnits="userSpaceOnUse" x="0" y="0" width="480" height="480" style="mask-type: luminance">
+              <rect width="480" height="480" fill="white"/>
+              <path d="M0 0 H350 V150 C367 169 375 195 378 218 C383 247 375 280 367 308 C351 355 307 380 252 390 H0Z" fill="black"/>
+            </mask>
+            <clipPath id="volty-character-clip"><rect width="480" height="390"/></clipPath>
+          </defs>
+          <g class="volty-float">
+            <g class="volty-approach">
+              <image class="volty-still" href="img/volty_hello.png" width="480" height="480" mask="url(#volty-still-mask)" clip-path="url(#volty-character-clip)"/>
+              <g class="volty-arm-depth" mask="url(#volty-arm-depth-mask)">
+                <g class="volty-wave-arm">
+                  <svg x="354" y="198" width="80" height="110" viewBox="370 385 580 525" preserveAspectRatio="none" overflow="hidden">
+                    <image href="img/volty-parts/volty_arm_wave.png" width="1280" height="1280"/>
+                  </svg>
+                </g>
+              </g>
+            </g>
+          </g>
+        </svg>
+      </button>
+      <div class="hero-say">잠깐 쉬어갈까요?<br>근처에 다녀올 곳을 찾아볼게요!</div>
       <p class="hand">기다리는 시간이, 좋아지는 경험.</p>
     </div>
 
-    <div class="car">
-      <div class="car-main">
-        <div class="ring" id="ring"><b id="soc">—</b></div>
-        <div class="car-text">
-          <b id="carMain">차량 상태를 확인하는 중…</b>
-          <span id="carSub"></span>
+    <div class="battery-summary" id="batterySummary" data-level="unknown" data-charging="unknown">
+      <div class="battery-label">
+        <div class="battery-heading"><span class="battery-title">차량 배터리</span>
+        <span class="battery-status" role="status">
+          <svg class="battery-icon-active" viewBox="0 0 16 16" aria-hidden="true"><path d="m9 1-6 8h4l-1 6 7-9H9z"/></svg>
+          <svg class="battery-icon-idle" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4v8M10 4v8"/></svg>
+          <svg class="battery-icon-unknown" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M8 7v4M8 4.5h.01"/></svg>
+          <span id="batteryStatus">상태 확인 중</span>
+        </span>
+          <span class="battery-caption" id="batteryCaption" hidden></span>
+        </div>
+        <span class="battery-reading"><b id="batteryPct">—</b></span>
+      </div>
+      <div class="battery-case">
+        <div class="battery-track" id="batteryGauge" role="meter" aria-label="차량 배터리 잔량" aria-valuemin="0" aria-valuemax="100" aria-valuetext="아직 확인하지 못했어요">
+          <span class="battery-fill" id="batteryFill"></span>
+          <span class="battery-charge" id="batteryCharge" aria-hidden="true" hidden></span>
+          <span class="battery-gloss" aria-hidden="true"></span>
+          <span class="battery-target" id="batteryTarget" style="left: 80%" title="목표 80%" aria-hidden="true"></span>
         </div>
       </div>
-      <div class="car-times" id="carTimes" hidden>
-        <div><span>충전 완료 예정</span><b id="carFinish">—</b></div>
-        <div><span>차로 돌아올 시간</span><b id="carDeadline">—</b></div>
-      </div>
-      <p class="car-note" id="carNote" hidden></p>
-      <button type="button" id="refreshCar">차량 상태 새로고침</button>
+      <p class="battery-estimate" id="batteryEstimate" aria-live="polite" hidden>
+        <span id="batteryRemaining"></span>
+        <span id="batteryFinish"></span>
+      </p>
     </div>
 
-    <h2 class="ask">지금 뭐 할까요?</h2>
+    <div class="ask-row"><h2 class="ask">지금 뭐 할까요?</h2><button class="subtle history-open" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 17l-2 4v-9a9 9 0 1 1 5 8M12 7v5l3 2"/></svg><span>대화 기록</span></button></div>
     <div class="intents" id="intents">
       <button type="button" data-text="간단히 밥 먹고 오고 싶어">
         <i><svg viewBox="0 0 24 24"><path d="M3 11h18a9 9 0 0 1-18 0z"/><path d="M6 5l9 6M12 3l5 8"/></svg></i>밥 먹고 오기</button>
@@ -225,14 +338,21 @@
         <p class="times" id="strip" hidden></p>
       </div>
     </div>
+    <div class="chat-actions"><button class="subtle" id="conditionsBtn" type="button">조건 바꾸기</button><button class="subtle" id="preferencesBtn" type="button">내 취향</button><button class="subtle history-open" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 17l-2 4v-9a9 9 0 1 1 5 8M12 7v5l3 2"/></svg><span>대화 기록</span></button></div>
+    <p class="condition-summary" id="conditionSummary" hidden></p>
+    <p class="archive-note" id="archiveNote" hidden>보관된 대화예요. 새 대화에서 다시 추천받을 수 있어요.</p>
+    <section class="station-options" id="stationOptions" aria-label="출발 충전소 선택" hidden></section>
     <section class="route-map" id="routeMap" aria-labelledby="mapTitle" hidden>
+      <button class="map-back" type="button">← 이전 화면으로</button>
       <div class="map-heading">
         <div><h3 id="mapTitle">걸어서 다녀오는 길</h3><p class="map-place"></p></div>
         <button class="map-fit" type="button" disabled>전체 보기</button>
       </div>
+      <div class="map-places" role="group" aria-label="지도에서 볼 추천 장소"></div>
       <div class="map-stage">
         <div class="map-canvas" id="tmapCanvas" role="region" aria-label="충전소와 추천 장소 지도" hidden></div>
-        <div class="map-empty" role="status"><p>장소를 선택하면 지도를 볼 수 있어요.</p><button class="map-retry" type="button" hidden>다시 시도</button></div>
+        <div class="map-tile-status" role="status" hidden><p></p><button class="map-tile-retry" type="button">지도 다시 불러오기</button></div>
+        <div class="map-empty" role="status"><p>장소를 선택하면 지도를 볼 수 있어요.</p><button class="map-retry" type="button" hidden>다시 시도</button><button class="map-start" type="button" hidden>추천받으러 가기</button></div>
       </div>
       <div class="map-controls" role="group" aria-label="표시할 도보 경로">
         <button type="button" data-direction="both" aria-pressed="true">왕복</button>
@@ -245,6 +365,7 @@
     <div class="follow" id="follow"></div>
   </section>
 
+  <button class="subtle" id="pendingReview" type="button" hidden>취향 저장 요청 확인</button>
   <form class="composer" id="composer">
     <input id="input" type="text" maxlength="500" placeholder="볼티에게 말하기" autocomplete="off">
     <button id="send" type="submit" aria-label="보내기"><svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button>
@@ -254,11 +375,11 @@
   <div class="scrim" id="approval" hidden>
     <div class="sheet">
       <img class="volty" src="img/volty_clock.png" alt="">
-      <h3 id="apTitle">이 취향을 기억해둘까요?</h3>
+      <h3 id="apTitle">이 계획으로 확정할까요?</h3>
       <p id="apBody"></p>
       <div class="sheet-btns">
-        <button class="primary" id="approve" type="button">네, 기억해줘</button>
-        <button class="quiet" id="reject" type="button">저장하지 않을게요</button>
+        <button class="primary" id="approve" type="button">네, 확정할게요</button>
+        <button class="quiet" id="reject" type="button">다시 볼래요</button>
       </div>
     </div>
   </div>
@@ -273,332 +394,35 @@
   </div>
 </div>
 
+<dialog class="car-dialog" id="carDialog" aria-labelledby="carDialogTitle">
+  <div class="sheet">
+    <h3 id="carDialogTitle">차량 충전 상태</h3>
+    <div class="car" id="carStatus">
+      <div class="car-main">
+        <div class="ring" id="ring"><b id="soc">—</b></div>
+        <div class="car-text">
+          <b id="carMain">차량 상태를 확인하는 중…</b>
+          <span id="carSub"></span>
+        </div>
+      </div>
+      <div class="car-times" id="carTimes" hidden>
+        <div><span>충전 완료 예정</span><b id="carFinish">—</b></div>
+      </div>
+    </div>
+    <details class="vehicle-details"><summary>충전 정보 상세</summary><div class="vehicle-meta" id="vehicleMeta"></div></details>
+    <p class="inline-status" id="refreshStatus" role="status"></p>
+    <div class="sheet-btns"><button class="primary" id="refreshCar" type="button">새로고침</button><button class="quiet" id="carClose" type="button" autofocus>닫기</button></div>
+  </div>
+</dialog>
+
+<dialog class="feature-dialog" id="featureDialog" aria-labelledby="featureTitle"><div class="feature-head"><h3 id="featureTitle"></h3><button class="subtle" id="featureClose" type="button" aria-label="닫기">닫기</button></div><div id="featureBody"></div></dialog>
+<div id="notice" class="notice" role="status" hidden></div>
+
 <script src="map-config.js"></script>
-<script src="session.js"></script>
-<script src="map.js"></script>
-<script>
-  const IMG = { hello: 'img/volty_hello.png', think: 'img/volty_think.png', point: 'img/volty_point.png',
-                coffee: 'img/volty_coffee.png', clock: 'img/volty_clock.png' };
-  // 상태별 볼티 표정과 한 줄 (설계서 2.4 VoltGoResponse.status)
-  const MOOD = {
-    busy: ['think', '충전 상태랑 근처 장소, 왕복 시간을 보고 있어요…'],
-    ok: ['point', '지금 다녀올 수 있는 곳이에요. 출발 마감만 지켜 주세요!'],
-    need_input: ['think', '조금만 더 알려주시면 바로 계산해 볼게요.'],
-    no_feasible: ['think', '이번엔 시간이 빠듯해요. 더 가까운 곳은 어떠세요?'],
-    awaiting_approval: ['clock', '다음에도 쓸 취향을 저장할까요?'],
-    confirmed: ['coffee', '확정! 출발 마감 시각만 지켜 주세요.'],
-    error: ['think', '잠깐 문제가 생겼어요. 다시 말해 주세요.'],
-  };
-  const CAT = { meal: '식사', cafe: '카페', convenience: '편의점', mart: '마트' };
-  const PLUG = { fast: '급속', slow: '완속', none: '미연결' };
-  const FIELD = { charging: '충전 정보', remaining_min: '남은 충전 시간', origin: '출발 충전소', intent: '하고 싶은 일' };
-  const SHORT = { '충전 정보는 Mock 데이터입니다': '충전 Mock', '장소 정보는 Mock 데이터입니다': '장소 Mock', '보행 경로는 Mock 데이터입니다': '경로 Mock',
-                  '영업 여부는 확인되지 않았습니다': '영업 미확인', '잔여시간은 배터리 용량·평균 전력 정책값으로 추정한 값입니다': '잔여시간 추정' };
-
-  const $ = (s) => document.querySelector(s);
-  const routeMap = new VoltGoRouteMap($('#routeMap'));
-  const esc = (t) => String(t ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const hhmm = (iso) => iso ? iso.slice(11, 16) : '—';
-  const min = (sec) => Math.floor((sec || 0) / 60);
-
-  let threadId = '', busy = true, health = {}, session = {}, lastRes = null;
-  let history = null, entries = [], pendingRequestId = null;
-
-  function clearVisitorView() {
-    history = null; entries = []; threadId = ''; session = {}; lastRes = null; pendingRequestId = null;
-    $('#messages').innerHTML = ''; $('#follow').innerHTML = ''; $('#infoList').innerHTML = '';
-    $('#approval').hidden = true; $('#info').hidden = true;
-    routeMap.reset(); renderCar({}); renderStrip({}, null);
-  }
-
-  async function api(path, body) {
-    const opt = body ? { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
-                     : { credentials: 'same-origin', cache: 'no-store' };
-    const r = await fetch(path, opt);
-    const data = await r.json().catch(() => ({ error: '서버 응답을 읽지 못했어요' }));
-    if (data.session && data.session.user_id !== health.user_id) {
-      clearVisitorView();
-      const error = new Error('접속 세션이 바뀌었습니다. 새로고침해 주세요.');
-      error.status = 401;
-      throw error;
-    }
-    if (!r.ok || data.error) {
-      const error = new Error(data.error || ('HTTP ' + r.status));
-      error.status = r.status;
-      if (r.status === 401) {
-        // 쿠키가 바뀐 뒤 이전 사용자의 화면·기록을 다음 사용자에게 재사용하지 않는다.
-        clearVisitorView();
-      }
-      throw error;
-    }
-    return data;
-  }
-
-  // ---------- 홈 카드 ----------
-  function renderCar(s) {
-    const c = s.charging, b = s.home_budget;
-    $('#carTimes').hidden = !b; $('#carNote').hidden = true;
-    if (!c) {
-      $('#soc').textContent = '—'; $('#ring').style.setProperty('--soc', 0);
-      $('#carMain').textContent = '차량 상태를 아직 못 읽었어요';
-      $('#carSub').textContent = '대화를 시작하면 다시 확인해요';
-      return;
-    }
-    if (b) {
-      $('#carFinish').textContent = hhmm(b.finish_at);
-      $('#carDeadline').textContent = hhmm(b.return_deadline);
-      $('#carNote').hidden = false;
-      $('#carNote').textContent = `복귀 버퍼 ${b.buffer_min}분을 뺀 시각이에요. 시간 제한을 말하면 다시 계산해요.`;
-    }
-    $('#ring').style.setProperty('--soc', c.soc_pct ?? 0);
-    $('#soc').textContent = c.soc_pct != null ? Math.round(c.soc_pct) + '%' : '—';
-    if (c.charging === false) $('#carMain').textContent = '지금은 충전 중이 아니에요';
-    else if (c.target_soc_pct == null) $('#carMain').textContent = '목표 충전량을 알려주세요';
-    else if (c.reported_remaining_sec) $('#carMain').textContent = `목표 ${c.target_soc_pct}%까지 약 ${min(c.reported_remaining_sec)}분`;
-    else $('#carMain').textContent = `목표 ${c.target_soc_pct}%까지 충전 중`;
-    $('#carSub').textContent = [PLUG[c.plug_type] + ' 충전', s.origin, c.source === 'mock' ? 'Mock 데이터' : ''].filter(Boolean).join(' · ');
-  }
-
-  // ---------- 대화 화면 ----------
-  function setMood(key) {
-    const [img, say] = MOOD[key] || MOOD.busy;
-    $('#moodImg').src = IMG[img];
-    $('#moodSay').textContent = say;
-  }
-  function renderStrip(s, res) {
-    const b = s.time_budget;
-    const finish = b ? b.finish_at : res && res.finish_at;
-    const dl = b ? b.return_deadline : res && res.return_deadline;
-    if (!finish && !dl) { $('#strip').hidden = true; return; }
-    $('#strip').hidden = false;
-    $('#strip').innerHTML = `<span>충전 완료 <b>${hhmm(finish)}</b></span><span>복귀 마감 <b>${hhmm(dl)}</b></span>` +
-      (b ? `<span>여유 <b>${min(b.available_sec)}분</b></span>` : '');
-  }
-  function scrollDown() { const m = $('#messages'); m.scrollTop = m.scrollHeight; }
-
-  function addMe(text) {
-    $('#messages').insertAdjacentHTML('beforeend', `<div class="row me"><div class="say"><p>${esc(text)}</p></div></div>`);
-    scrollDown();
-  }
-  function addTyping() {
-    $('#messages').insertAdjacentHTML('beforeend',
-      `<div class="row bot" id="typing"><img class="mini" src="${IMG.think}" alt=""><div class="col"><div class="say"><span class="typing"><i></i><i></i><i></i></span></div></div></div>`);
-    scrollDown();
-  }
-  function removeTyping() { const t = $('#typing'); if (t) t.remove(); }
-
-  function planCard(c, status, mapKey) {
-    const done = status === 'confirmed';
-    const seg = (sec, cls) => sec > 0 ? `<span class="seg ${cls}" style="flex:${sec}"></span>` : '';
-    const src = [c.poi_source === 'mock' ? '장소 Mock' : '장소 TMAP', c.route_source === 'mock' ? '경로 Mock' : '경로 TMAP',
-                 c.opening_status === 'unknown' ? '영업 미확인' : ''].filter(Boolean).join(' · ');
-    return `
-      <article class="plan${done ? ' done' : ''}">
-        <div class="plan-head"><span class="cat">${esc(CAT[c.category] || c.category)}</span><h4>${esc(c.name)}</h4></div>
-        <p class="plan-line">걸어서 ${min(c.outbound_sec)}분 · ${min(c.dwell_sec)}분 머물고 · <b>${hhmm(c.return_at)}</b> 복귀
-          <span class="slack">여유 ${min(c.slack_sec)}분</span></p>
-        <div class="tbar" title="가는 길 ${min(c.outbound_sec)}분 / 체류 ${min(c.dwell_sec)}분 / 오는 길 ${min(c.inbound_sec)}분 / 여유 ${min(c.slack_sec)}분">
-          ${seg(c.outbound_sec, 'out')}${seg(c.dwell_sec, 'stay')}${seg(c.inbound_sec, 'in')}${seg(c.slack_sec, 'slack')}</div>
-        <div class="plan-foot">
-          <span class="leave">늦어도 <b>${hhmm(c.leave_by)}</b> 출발</span>
-          ${done ? '<span class="done-tag">확정한 계획</span>'
-                 : `<button type="button" class="pick" data-text="${esc(c.plan_id)} 계획(${esc(c.name)})으로 확정할게">여기로 갈래요</button>`}
-        </div>
-        <p class="plan-src">${src}</p>
-        <button class="map-open" type="button" data-map-key="${mapKey}" aria-controls="routeMap" aria-pressed="false">지도에서 보기</button>
-      </article>`;
-  }
-
-  function addBot(res, mapData, restoring = false) {
-    const cands = res.candidates || [];
-    const mapKeys = routeMap.register(res, mapData);
-    const mood = MOOD[res.status] ? res.status : 'busy';
-    // 후보 줄("1) ...")은 카드로, 경고 줄("※")은 작은 글씨로, 시간 요약 줄은 위 띠로 옮긴다
-    const lines = (res.message || '').split('\n').filter((l) => l.trim() && !(cands.length && /^\d+\)\s/.test(l))
-      && !l.startsWith('※') && !l.startsWith('충전 완료 예정'));
-    const warns = (res.warnings || []).map((w) => SHORT[w] || w);
-    const confirmed = res.status === 'confirmed' && cands[0];
-    const html = `
-      <div class="row bot">
-        <img class="mini" src="${IMG[MOOD[mood][0]]}" alt="">
-        <div class="col">
-          ${lines.length ? `<div class="say">${lines.map((l) => `<p>${esc(l)}</p>`).join('')}</div>` : ''}
-          ${res.status === 'need_input' && (res.missing_fields || []).length
-            ? `<p class="fine">알려주시면 좋은 것: ${res.missing_fields.map((f) => esc(FIELD[f] || f)).join(', ')}</p>` : ''}
-          ${confirmed ? `<div class="arrival"><div><span>늦어도 출발</span><b>${hhmm(confirmed.leave_by)}</b></div><div><span>차량 복귀</span><b>${hhmm(confirmed.return_at)}</b></div></div>` : ''}
-          ${cands.length ? cands.map((c, i) => planCard(c, res.status, mapKeys[i])).join('') : ''}
-          ${warns.length ? `<p class="fine">※ ${warns.map(esc).join(' · ')}</p>` : ''}
-        </div>
-      </div>`;
-    $('#messages').insertAdjacentHTML('beforeend', html);
-    if (mapKeys.length) routeMap.select(mapKeys[0]);
-    else routeMap.hide();
-    setMood(mood);
-    renderFollow(res);
-    if (res.status === 'awaiting_approval' && !restoring) openApproval(res);
-    scrollDown();
-  }
-
-  function addError(text) {
-    $('#messages').insertAdjacentHTML('beforeend',
-      `<div class="row bot"><img class="mini" src="${IMG.think}" alt=""><div class="col"><div class="say"><p>${esc(text)}</p></div></div></div>`);
-    setMood('error'); $('#follow').innerHTML = ''; scrollDown();
-  }
-
-  // 답변 다음에 이어 말할 만한 것들
-  function renderFollow(res) {
-    const c = (res.candidates || [])[0];
-    let items = [];
-    if (res.status === 'ok' && c) items = [['20분은 걸릴 것 같아요', `${CAT[c.category] || '체류'}는 20분 걸려`], ['카페로 바꿔볼래요', '카페로 바꿔서 다시 찾아줘']];
-    else if (res.status === 'no_feasible') items = [['편의점도 괜찮아요', '편의점도 괜찮아. 다시 찾아줘'], ['시간을 줄여볼게요', '체류는 10분이면 돼']];
-    else if (res.status === 'confirmed' && c) items = [['이 취향 기억해줘', `${CAT[c.category] || ''}를 선호해. 다음에도 기억해줘`]];
-    if (session.preferences && res.status !== 'awaiting_approval') items.push(['기억한 취향 지우기', '저장한 선호 지워줘']);
-    $('#follow').innerHTML = items.map(([label, text]) => `<button type="button" data-text="${esc(text)}">${esc(label)}</button>`).join('');
-  }
-
-  // ---------- 승인 시트 ----------
-  function openApproval(res) {
-    $('#apTitle').textContent = '이 취향을 기억해둘까요?';
-    $('#apBody').textContent = (res.message || '선호를 저장할까요?').replace(/\s*\(approve \/ reject\)/g, '')
-      + '\n승인하면 다음 대화에도 사용해요. 2분이 지나면 다시 요청해 주세요.';
-    $('#approve').textContent = '네, 기억해줘';
-    $('#reject').textContent = '저장하지 않을게요';
-    $('#approval').hidden = false;
-    setLock();
-  }
-
-  function setLock() {
-    const awaiting = !$('#approval').hidden;
-    $('#input').disabled = busy || awaiting || !threadId;
-    $('#send').disabled = busy || awaiting || !threadId;
-    $('#input').placeholder = awaiting ? '위에서 먼저 결정해 주세요' : '볼티에게 말하기';
-    document.querySelectorAll('#follow button, #intents button, button.pick').forEach((b) => (b.disabled = busy || awaiting || !threadId));
-    $('#approve').disabled = busy; $('#reject').disabled = busy;
-    $('#homeBtn').disabled = busy;
-    $('#refreshCar').disabled = busy || !threadId;
-  }
-
-  // ---------- 실행 정보 ----------
-  function renderInfo() {
-    const p = session.preferences, k = session.counters || {};
-    const rows = [
-      ['충전 데이터', health.charging === 'mock' ? 'Mock' : '현대차 실연동'],
-      ['장소·경로', health.tmap === 'tmap' ? 'TMAP 실연동' : 'Mock'],
-      ['시계', health.clock === 'fixed' ? '2026-09-10 14:00 고정' : '실제 시각'],
-      ['모델', health.model || '—'],
-      ['접속', '이 브라우저의 익명 세션'],
-      ['기억한 취향', p ? [CAT[p.preferred_category], p.dwell_min ? `체류 ${p.dwell_min}분` : ''].filter(Boolean).join(' · ') : '없음'],
-      ['조건 버전', session.condition_version ? 'v' + session.condition_version + (session.confirmed ? ' · 확정 ' + session.confirmed.plan_id : '') : '—'],
-      ['호출 (모델 / 도구 / API)', `${k.model ?? 0} / ${k.tool ?? 0} / ${k.api ?? 0}`],
-      ['thread', threadId],
-    ];
-    $('#infoList').innerHTML = rows.map(([a, b]) => `<div><span>${esc(a)}</span><b>${esc(b)}</b></div>`).join('');
-  }
-
-  // ---------- 흐름 ----------
-  function showChat() { $('#home').hidden = true; $('#chat').hidden = false; $('#homeBtn').hidden = false; }
-
-  async function send(text) {
-    text = (text || '').trim();
-    if (!text || busy || !threadId || !$('#approval').hidden) return;
-    showChat(); addMe(text); $('#input').value = '';
-    busy = true; setLock(); setMood('busy'); addTyping();
-    try {
-      const d = await api('/api/ask', { thread_id: threadId, text });
-      session = d.session; lastRes = d.response; pendingRequestId = d.request_id;
-      entries.push({ me: text }, { response: d.response, map_data: d.map_data }); history.save(threadId, entries);
-      removeTyping(); renderStrip(session, d.response); addBot(d.response, d.map_data);
-      if (d.pending_response) openApproval(d.pending_response);
-    } catch (e) { removeTyping(); addError(e.message); }
-    finally { busy = false; setLock(); }
-  }
-
-  async function decideNow(decision) {
-    if (busy || $('#approval').hidden || !pendingRequestId) return;
-    $('#approval').hidden = true;
-    addMe(decision === 'approve' ? $('#approve').textContent : $('#reject').textContent);
-    busy = true; setLock(); setMood('busy'); addTyping();
-    try {
-      const d = await api('/api/decide', { thread_id: threadId, decision, request_id: pendingRequestId });
-      session = d.session; lastRes = d.response; pendingRequestId = d.request_id;
-      entries.push({ me: decision === 'approve' ? '네, 기억해줘' : '저장하지 않을게요' }, { response: d.response });
-      history.save(threadId, entries);
-      removeTyping(); renderStrip(session, d.response); addBot(d.response, d.map_data);
-      if (d.pending_response) openApproval(d.pending_response);
-    } catch (e) { removeTyping(); addError(e.message); $('#approval').hidden = [401, 404, 409].includes(e.status); }
-    finally { busy = false; setLock(); }
-  }
-
-  async function goHome() {
-    if (busy) return;
-    routeMap.reset();
-    threadId = ''; session = {}; lastRes = null; entries = []; pendingRequestId = null;
-    $('#messages').innerHTML = ''; $('#follow').innerHTML = ''; $('#strip').hidden = true;
-    $('#approval').hidden = true; $('#chat').hidden = true; $('#home').hidden = false; $('#homeBtn').hidden = true;
-    busy = true; setLock();
-    try {
-      health = await api('/api/health');
-      history = new VoltGoHistory(health.user_id);
-      const d = await api('/api/session', {});
-      threadId = d.thread_id; session = d.session; history.save(threadId, entries); renderCar(session);
-    } catch (e) { $('#carMain').textContent = e.message; $('#carTimes').hidden = true; }
-    finally { busy = false; setLock(); }
-  }
-
-  async function start() {
-    setLock();
-    try {
-      health = await api('/api/health');
-      history = new VoltGoHistory(health.user_id);
-      const saved = history.load();
-      if (saved) {
-        try {
-          // 소유권을 확인하기 전에는 브라우저에 남은 대화를 표시하지 않는다.
-          const d = await api('/api/session?thread_id=' + encodeURIComponent(saved.thread_id));
-          threadId = d.thread_id; session = d.session; entries = saved.entries;
-          if (entries.length) showChat();
-          for (const entry of entries) {
-            if (typeof entry.me === 'string') addMe(entry.me);
-            else if (entry.response) { lastRes = entry.response; addBot(entry.response, entry.map_data, true); }
-          }
-          $('#approval').hidden = true; pendingRequestId = d.request_id;
-          if (d.pending_response) openApproval(d.pending_response);
-          renderCar(session); renderStrip(session, lastRes);
-          busy = false; setLock(); return;
-        } catch (e) { if (![401, 404].includes(e.status)) throw e; }
-      }
-      busy = false; await goHome();
-    } catch (e) { $('#carMain').textContent = e.message; busy = false; setLock(); }
-  }
-
-  $('#composer').addEventListener('submit', (e) => { e.preventDefault(); send($('#input').value); });
-  document.addEventListener('click', (e) => {
-    const mapButton = e.target.closest('button[data-map-key]');
-    if (mapButton) { routeMap.select(mapButton.dataset.mapKey, true); return; }
-    const b = e.target.closest('button[data-text]');
-    if (b && !b.disabled) send(b.dataset.text);
-  });
-  $('#approve').addEventListener('click', () => decideNow('approve'));
-  $('#reject').addEventListener('click', () => decideNow('reject'));
-  $('#homeBtn').addEventListener('click', goHome);
-  $('#refreshCar').addEventListener('click', async () => {
-    if (busy || !threadId) return;
-    busy = true; setLock();
-    try {
-      const d = await api('/api/charging/refresh', { thread_id: threadId });
-      session = d.session; renderCar(session);
-      if (d.result.status === 'error') $('#carMain').textContent = d.result.message;
-    } catch (e) { $('#carMain').textContent = e.message; }
-    finally { busy = false; setLock(); }
-  });
-  $('#homeVolty').addEventListener('click', (e) => {          // 누르면 다시 인사
-    e.target.classList.remove('greet'); void e.target.offsetWidth; e.target.classList.add('greet');
-  });
-  $('#infoBtn').addEventListener('click', () => { renderInfo(); $('#info').hidden = false; });
-  $('#infoClose').addEventListener('click', () => { $('#info').hidden = true; });
-  $('#info').addEventListener('click', (e) => { if (e.target === $('#info')) $('#info').hidden = true; });
-
-  start();
-</script>
+<script src="map-leaflet.js?v=20260911-map-live"></script>
+<script src="map.js?v=20260911-map-live"></script>
+<script src="home-volty.js?v=20260911-smooth16"></script>
+<script src="features.js?v=20260911-map-live"></script>
+<script src="app.js?v=20260911-map-live"></script>
 </body>
 </html>

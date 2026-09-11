@@ -51,6 +51,25 @@ def test_c001_happy_path_and_confirm(context):
     assert again["message"] == "이미 확정된 계획"
 
 
+def test_switch_destination_back_rechecks_and_updates_current_plan(context, now):
+    tools.get_charging_status.func(rt(context))
+    tools.calculate_time_budget.func(rt(context), user_limit_min=30)
+    tools.search_nearby_places.func(rt(context), category="meal")
+    tools.get_walking_routes.func(rt(context), poi_ids=["A", "B"])
+    tools.select_feasible_plans.func(rt(context), dwell_min=12)
+    version = context.session.condition_version
+    for plan_id in ("A", "B"):
+        assert tools.confirm_plan.func(rt(context), plan_id=plan_id, version=version)["status"] == "ok"
+        assert context.session.confirmed.plan_id == plan_id
+    context.clock = lambda: now + timedelta(minutes=1)
+    result = tools.confirm_plan.func(rt(context), plan_id="A", version=version)
+    assert result["status"] == "ok"
+    assert context.session.confirmed.plan_id == "A"
+    assert context.session.confirmed.confirmed_at == context.clock()
+    again = tools.confirm_plan.func(rt(context), plan_id="A", version=version)
+    assert again["message"] == "이미 확정된 계획"
+
+
 def test_c013_dwell_change_bumps_version_and_drops_approval(context):
     tools.get_charging_status.func(rt(context))
     tools.calculate_time_budget.func(rt(context), user_limit_min=30)
@@ -161,22 +180,23 @@ def test_preferences_save_and_isolation(context):
     assert memory.load_preferences("u1") is None
 
 
-def test_c028_target_mismatch_deadline_survives_confirm(context):
-    # 차량 설정 목표(80%, mock) > 사용자 목표(60%) -> 에너지 추정으로 전환.
-    # confirm_plan 재검증에서도 같은 기준(에너지 추정)이 유지되고 마감이 그대로여야 한다.
+def test_vehicle_target_deadline_survives_confirm(context):
+    # 과거 세션에 다른 목표가 남아 있어도 추천/확정은 차량 조회값을 사용한다.
     s = context.session
     tools.get_charging_status.func(rt(context))
-    tools.calculate_time_budget.func(rt(context), target_soc_pct=60)
-    assert s.time_budget.estimate_basis == "energy_power"
+    s.target_soc_pct = 60
+    tools.calculate_time_budget.func(rt(context))
+    assert s.target_soc_pct == 80
+    assert s.time_budget.estimate_basis == "reported_remaining"
     recommended_deadline = s.time_budget.return_deadline
 
     tools.search_nearby_places.func(rt(context), category="meal")
     tools.get_walking_routes.func(rt(context), poi_ids=["A", "B", "C"])
-    tools.select_feasible_plans.func(rt(context), dwell_min=1)
+    tools.select_feasible_plans.func(rt(context), dwell_min=12)
     assert set(s.candidates) == {"A", "B"}
 
     version = s.candidates["A"].version
     r = tools.confirm_plan.func(rt(context), plan_id="A", version=version)
     assert r["status"] == "ok"
-    assert s.time_budget.estimate_basis == "energy_power"
+    assert s.time_budget.estimate_basis == "reported_remaining"
     assert s.time_budget.return_deadline == recommended_deadline

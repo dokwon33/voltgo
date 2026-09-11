@@ -142,7 +142,7 @@ voltgo/
 │   ├── demo.py               # CLI 시연 (대화형, 승인 프롬프트 포함)
 │   ├── probe_tmap_places.py  # TMAP 장소 API 실호출 확인 (원문은 data/raw/tmap/)
 │   └── web.py                # 웹 화면 서버 (표준 http.server, demo.py 와 같은 ask/decide)
-├── web/                      # 웹 화면 (index.html 하나 + img/ 캐릭터 볼티)
+├── web/                      # 웹 화면, 대화·지도·기록 스크립트, 스타일·캐릭터
 ├── tests/                    # pytest (계산·선별·어댑터·도구 흐름·출력 조립)
 ├── notebooks/                # 탐색/실험
 ├── docs/                     # 설계서·발표본
@@ -202,35 +202,36 @@ python scripts/web.py            # http://localhost:8000
 python scripts/web.py --fixed    # 14:00 고정 시계 (설계서 C001 조건)
 ```
 
-`scripts/demo.py` 와 같은 `ask()` / `decide()` 를 표준 `http.server` 로 감싼 것이라 추가 설치는 없다. 화면은 `web/index.html`, 캐릭터(볼티) 이미지는 `web/img/`에 있다. 지도 UI는 `web/map.js`·`web/map.css`로 분리했다.
+`scripts/demo.py`와 같은 `ask()` / `decide()`를 표준 `http.server`로 감싼 웹 화면입니다.
+프로젝트 의존성을 설치한 가상환경에서 실행하세요. 예: `.venv/bin/python scripts/web.py`.
+`web/index.html`이 화면, `app.js`가 대화 흐름, `features.js`가 기록·조건·선호 UI, `map.js`가 지도를 담당합니다.
 
-| 화면 | 보여주는 것 |
+| 화면 | 기능 |
 | --- | --- |
-| 왼쪽 패널 | SoC·목표 SoC, 충전 완료 예정·복귀 마감·가용 시간, 저장된 선호, 출발 충전소·조건 버전·호출 횟수 |
-| 대화 | 상태(추천 / 확인 필요 / 가능한 후보 없음 / 승인 대기 / 확정 / 오류), 후보 카드(가는 길·체류·오는 길·여유 막대, 복귀·출발 마감, 장소·경로 출처, 영업 미확인) |
-| 선호 저장 승인 | `awaiting_approval` 이면 입력을 잠그고 승인 / 거절 버튼만 보인다 → `POST /api/decide` |
-| 새 대화 | 새 thread_id. 저장 선호가 새 thread 에서 복원되는지(C014) 볼 때 쓴다 |
+| 홈 | 볼티, 배터리 게이지, 충전 상태·목표·완료 예상, 활동 선택, 대화 기록 |
+| 차량 아이콘 | 충전 상세·측정/조회 시각·계산 출처, 충전 정보 강제 새로고침 |
+| 대화 | 추천 카드, 왕복 상세, 조건 편집, 충전소 후보 선택, 지난 추천 비활성화 |
+| 확정한 목적지 | 목적지 이름·지도 버튼 강조, 목적지 유지·다른 후보 선택·조건별 재검색 |
+| 내 취향 | 저장된 선호 조회·변경·삭제, 실제 저장 내용과 120초 승인 만료 표시 |
+| 대화 기록 | 이 브라우저에 사용자별 최근 20개 보관, 새 대화, 살아 있는 서버 대화 재개, 과거 기록 조회 |
+| 지도 | 출발 충전소·장소 마커, 가는 길/오는 길. 지도 키가 없으면 OpenStreetMap 기본 지도 |
 
 | API | 내용 |
 | --- | --- |
-| `GET /api/health` | 서버가 익명 브라우저 세션 쿠키를 발급·검증. 현재 사용자 ID와 실행 정보 반환 |
+| `GET /map-config.js` | `.env`의 `TMAP_MAP_APP_KEY`(브라우저 공개용 지도 키)만 주입 |
+| `GET /api/health` | 접속 세션 확인과 실행 정보(충전·TMAP 모드, 시계, 모델, user_id) |
 | `POST /api/session` `{}` | 현재 사용자 소유의 새 대화 ID를 서버에서 발급 |
-| `GET /api/session?thread_id=` | 본인 대화의 Session 요약과 대기 중 승인 복원 |
-| `POST /api/ask` `{thread_id, text}` | `ask()` → `{response: VoltGoResponse, session}` |
-| `POST /api/decide` `{thread_id, request_id, decision}` | 본인 대화의 ID에 `approve` / `reject` 적용. 동일 결정/거절 사유의 재전송은 기존 응답 |
-| `POST /api/charging/refresh` `{thread_id}` | 본인 대화의 충전 상태를 다시 조회 |
+| `GET /api/session?thread_id=` | 본인 대화의 Session 요약, 대기 중 승인, `map_data` 복원 |
+| `POST /api/ask` `{thread_id, text, selection?}` | 선택한 후보의 ID·버전·생성시각을 검증한 뒤 `ask()` |
+| `POST /api/decide` `{thread_id, request_id, decision, reason?}` | 동일 결정·거절 사유의 재전송은 저장을 반복하지 않고 기존 응답 반환 |
+| `POST /api/charging/refresh` `{thread_id}` | 본인 대화의 충전 상태 강제 조회, 이전 추천 무효화 |
 
-지도는 **UI 준비 단계**다. 현재 서버는 `map_data`를 반환하지 않으므로 지도에 실제 보행 경로가 나타나지 않는다. TMAP 브라우저 지도 키도 기본값은 비어 있다. 연결 규격과 남은 작업은 [지도 프론트 연결 계약](docs/map-frontend-contract.md)에 정리했다. 서버 API 키를 프론트에 복사하지 않는다.
+지도 키는 `.env`의 `TMAP_MAP_APP_KEY`에 설정합니다. 웹 서버가 `/map-config.js`에 이 값만 전달하며, 브라우저에서 공개되는 키입니다.
+장소·경로 조회용 `TMAP_APP_KEY`는 공개하지 않습니다. 지도 키가 없으면 로컬 Leaflet과 OpenStreetMap 타일로 기본 지도를 보여줍니다.
 
-웹 서버는 localhost에서 사용하는 단일 프로세스 데모이며 **브라우저 세션별로 선호·대화·승인을 격리**한다. 웹은 `VOLTGO_USER_ID`를 사용하지 않는다. 동일 브라우저의 새 대화에서는 자기 선호를 공유하고, 새로고침하면 서버 소유권 확인 후 자기 기록·승인 화면을 복원한다. 다른 브라우저의 대화·승인 ID는 조회하거나 실행할 수 없다.
-
-익명 세션은 24시간 유지되며 쿠키 삭제·만료 또는 서버 재시작 시 새 사용자로 시작한다. 로그인 계정, 기기 간 사용자 연결, 이전 익명 사용자의 선호 복구는 제공하지 않는다. HTTPS 환경에서는 `VOLTGO_COOKIE_SECURE=true`를 설정한다. 상세 계약과 범위는 [접속자별 격리](docs/user-session-isolation.md)에 정리했다.
-
-브라우저 기록 복원의 별도 회귀 검증은 Node.js가 있는 환경에서 실행한다(추가 npm 패키지 없음).
-
-```bash
-node --test tests/test_web_history.cjs
-```
+웹 서버는 localhost에서 사용하는 단일 프로세스 데모이며 **접속 세션별로 선호·대화·승인을 격리**합니다.
+다른 사용자의 대화·승인 ID는 조회하거나 실행할 수 없습니다. HTTPS 환경에서는 `VOLTGO_COOKIE_SECURE=true`를 설정합니다.
+웹 서버 코드를 업데이트한 뒤에는 실행 중인 Python 서버도 재시작하세요.
 
 ### 실행 모드
 
@@ -295,14 +296,16 @@ print(res.status, res.message)
 
 ## 재현 가능한 검증
 
-[테스트 케이스와 실행 방법](docs/testing/README.md)에 현재 구성과 입력·기대 결과·확인 방법를 정리했다.
+[테스트 케이스와 실행 방법](docs/testing/README.md)에 현재 구성과 입력·기대 결과·확인 방법을 정리했다.
 자동 검증은 외부 모델/API 대신 고정 응답을 사용하며, Python 전체 회귀와 브라우저 기록 검증을 함께 실행한다.
 
 ```bash
+npm ci
+npx playwright install chromium
 python scripts/run_cases.py suite
 python scripts/run_cases.py list
 python scripts/run_cases.py TC22
 ```
 
 실행 로그·JUnit XML·커밋/환경/종료 코드 JSON은 `reports/`에 기록된다.
-A 후속 변경 및 남은 협의 항목은 [실행기 보완 작업](docs/tasks/A-runtime-hardening.md)을 참고한다.
+A 입력·오류·승인 처리 개선 내용은 [실행기 보완 작업](docs/tasks/A-runtime-hardening.md)을 참고한다.

@@ -12,7 +12,7 @@
 | 대화 소유권 | 서버가 대화 ID를 발급할 때 소유자 기록. 모든 조회·변경에서 검사 |
 | 에이전트 checkpoint | 사용자·대화 조합을 인코딩한 내부 thread ID |
 | 승인 캐시 | 해당 Session의 `approval_requests[request_id]`에 대기 화면과 완료 응답 저장 |
-| 브라우저 기록 | `voltgo.history.v1:<서버에서 확인한 user_id>` |
+| 브라우저 기록 | `voltgo.conversations.v1.<서버에서 확인한 user_id>` |
 
 사용자 ID를 요청 JSON에서 지정하면 400이다. 헤더나 쿼리의 사용자 ID도 인증에 사용하지 않는다. 공개된 `visitor_…` ID를 쿠키로 보내거나 세션 토큰을 변조해도 등록된 토큰이 아니므로 인증되지 않는다.
 
@@ -26,7 +26,7 @@
 4. `/api/ask` 응답이 `awaiting_approval`이면 응답 최상위의 `request_id`를 보관한다.
 5. `/api/decide`에 `{thread_id, request_id, decision}`을 보낸다. 승인 ID는 자기 대화에만 적용된다. 같은 결정과 거절 사유의 재전송은 완료 응답을 반환한다.
 
-`GET /api/session?thread_id=…`는 본인 상태와 `request_id`, `pending_response`를 반환한다. 프론트는 이 확인이 끝난 뒤에만 로컬 기록을 화면에 복원한다. 초기화 중 다른 탭에서 쿠키 사용자가 바뀌어 응답의 사용자 ID가 달라져도 이전 사용자 키로 기록을 저장하지 않고 화면을 비운다.
+`GET /api/session?thread_id=…`는 본인 상태와 `request_id`, `pending_response`, `pending_approval`을 반환한다. 현재 웹은 사용자별 키에 최근 20개 대화를 보관한다. 기록 선택 시 서버의 대화와 실행 인스턴스를 확인하며, 같은 실행의 대화는 이어서 사용하고 서버 재시작 등으로 복원할 수 없는 기록은 읽기 전용으로 표시한다.
 
 질문이 승인 화면을 덮어쓰지 않도록 승인 대기 중 `/api/ask`는 409다. 웹과 CLI가 동일한 `request_id`를 사용한다. 별도 승인 ID나 소비 캐시는 없다. 같은 ID와 같은 결정/거절 사유는 HTTP 200과 기존 `response`를 반환하며, 다른 결정/거절 사유는 409다. 승인 실행 중 오류도 200의 `response.status=error`로 보관하므로 같은 ID로 저장을 다시 실행하지 않는다.
 
@@ -56,7 +56,9 @@
 
 ```bash
 python -m pytest -q
-node --test tests/test_web_history.cjs
+npm ci
+npx playwright install chromium
+node --test web/tests/*.cjs
 ```
 
 Python 검증은 실제 HTTP 파서·쿠키 헤더·웹 핸들러와 실제 에이전트/HITL을 사용하며 모델·외부 API 응답만 테스트 대역을 쓴다. 같은 IP의 서로 다른 쿠키 저장소 두 개로 다음을 확인한다.
@@ -67,4 +69,4 @@ Python 검증은 실제 HTTP 파서·쿠키 헤더·웹 핸들러와 실제 에�
 - 다른 사용자 또는 같은 사용자의 다른 대화에서 승인 ID를 재사용할 수 없다.
 - 승인 중복·실패 후 재전송은 저장 반복 없이 원래 응답을 반환한다. 결정 충돌, 쿠키 변조·만료, 사용자 ID 위조, 다른 사이트의 POST는 거부한다.
 
-JavaScript 검증은 실제 페이지 초기화 코드를 실행해 다른 사용자 기록 미열람, 조작된 대화 ID의 표시 차단, 초기화 도중 사용자 변경 감지, 본인 기록 복원을 확인한다.
+JavaScript 검증은 실제 브라우저에서 거부 입력 미저장, 새 대화 분리, 기록 복원, 승인 요청 ID와 현재 승인 화면 유지를 확인한다.

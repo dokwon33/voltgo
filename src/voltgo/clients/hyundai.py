@@ -69,7 +69,7 @@ def parse_charging_response(raw: dict, source: str = "hyundai",
     return ChargingSnapshot(
         charging=charging,
         soc_pct=float(soc) if soc is not None else None,
-        target_soc_pct=target_val,           # 계산 경로(model_copy)에서 덮어쓸 수 있음
+        target_soc_pct=target_val,           # 차량 조회값. 대화/계산 경로에서 덮어쓰지 않음
         reported_target_soc_pct=target_val,  # API 원문 그대로, 이후 안 덮어씀 (2.4/2.5.2)
         capacity_kwh=capacity_kwh if capacity_kwh is not None else DEFAULT_CAPACITY_KWH,
         capacity_source=capacity_source,

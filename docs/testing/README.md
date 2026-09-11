@@ -4,7 +4,7 @@
 
 ## 1 현재 구성과 검증 범위
 
-기준 main: PR10까지 병합된 `684728f45c2c9cd3fed0ec5927c04e7961efa622`. 후속 변경: `feat/a-runtime-hardening`. 실제 실행 SHA와 작업 트리 변경 유무는 실행 결과 JSON에 기록한다.
+기준 main: `7053fbb27a514c468f1b337a705d94c645c2490e`. 후속 변경: `feat/a-runtime-hardening`. 실제 실행 SHA와 작업 트리 변경 유무는 실행 결과 JSON에 기록한다.
 
 정상 흐름은 충전소 확인 → 충전 조회 → 시간 예산 → 장소 검색 → 왕복 경로 → 후보 선별 → 사용자 선택 → 재검증·확정이다. 선호 저장은 별도의 사용자 승인 뒤 실행한다. 경로 조회가 정상인데 시간 때문에 후보가 없으면 PR10의 대체 활동 판정으로 넘어가며, 다음 사용자 응답 전에는 다른 업종을 자동 검색하지 않는다.
 
@@ -23,7 +23,7 @@
 
 ## 2 환경 준비
 
-저장소 접근 권한, Git, Python 3.12, Node.js가 필요하다. 확인한 환경은 macOS, Python 3.12.14, Node.js 26.7.0이다. 아래 Windows 절차는 안내이며 이 환경에서 직접 실행하지 않았다.
+저장소 접근 권한, Git, Python 3.12, Node.js 20 이상이 필요하다. 확인한 환경은 macOS, Python 3.12.14, Node.js 26.7.0이다. 아래 Windows 절차는 안내이며 이 환경에서 직접 실행하지 않았다.
 
 새 폴더에서 저장소와 작업 브랜치를 준비한다. 기존 작업 디렉터리의 변경사항을 덮어쓰지 않도록 별도 폴더를 사용한다.
 
@@ -40,6 +40,8 @@ python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
 node --version
+npm ci
+npx playwright install chromium
 ```
 
 Windows PowerShell:
@@ -48,12 +50,14 @@ Windows PowerShell:
 py -3.12 -m venv .venv
 .venv\Scripts\python.exe -m pip install -r requirements.txt
 node --version
+npm ci
+npx playwright install chromium
 .venv\Scripts\python.exe scripts/run_cases.py suite
 ```
 
 Windows에서는 이후 명령의 `python`을 `.venv\Scripts\python.exe`로 바꾸면 활성화 없이 실행할 수 있다.
 
-의존성은 requirements.txt에 고정되어 있다: langchain 1.4.0, langchain-openai 1.6.2, langgraph 1.2.11, pydantic 2.13.5, python-dotenv 1.2.3, requests 2.34.2, pytest 9.1.1. Node 테스트는 추가 npm 패키지가 필요 없다.
+의존성은 requirements.txt에 고정되어 있다: langchain 1.4.0, langchain-openai 1.6.2, langgraph 1.2.11, pydantic 2.13.5, python-dotenv 1.2.3, requests 2.34.2, pytest 9.1.1. 브라우저 검사는 package-lock.json에 고정한 Playwright와 Chromium을 사용한다. Linux에서 브라우저 시스템 라이브러리가 없으면 `npx playwright install --with-deps chromium`으로 준비한다.
 
 자동 검증에는 API 키가 필요 없다. 실행기는 자식 프로세스에서 .env 로딩과 tracing을 끄고 실계정 키를 비운다. 실제 graph·도구·HTTP 핸들러를 실행하되 모델 응답과 외부 API만 고정 대역으로 바꾼다. 선호 파일은 pytest 임시 디렉터리를 사용한다.
 
@@ -76,7 +80,7 @@ python scripts/run_cases.py TC23
 
 ```sh
 python -m pytest -vv -s tests/test_runtime.py
-node --test tests/test_web_history.cjs
+node --test web/tests/*.cjs
 ```
 
 결과는 `reports/<UTC실행시각>/`에 저장한다. `--output reports/review`로 위치를 지정할 수 있다. 같은 출력 디렉터리와 같은 명령을 재사용하면 이전 결과 파일이 덮어써지므로 실행별 경로를 권장한다.
@@ -90,7 +94,7 @@ node --test tests/test_web_history.cjs
 
 Pass는 종료 코드 0, 실패·오류·의도치 않은 skip 없음, 각 TC의 assert 충족으로 판정한다. 저장은 응답 문구뿐 아니라 파일·필드·쓰기 횟수를 확인한다. pytest의 검증 실패는 1, 수집/사용 오류는 2, 실행 파일 부재는 실행기에서 127로 기록한다. Python이 성공해도 Node가 없거나 실패하면 suite 전체는 실패다.
 
-현재 변경의 전체 검사에서 Python 235개와 Node 6개가 통과했다. 문서 대표 검사 all은 Python 142개와 Node 6개가 통과했다. Pydantic Context 직렬화 경고 150건이 남아 있다. 경고를 숨기거나 경고 없는 실행으로 보고하지 않는다. 모델 로그의 9/8은 실행 전 차단 시도이며 실제 호출 수는 TC17·TC22의 모델/handler 횟수 assert로 확인한다.
+검사 개수와 경고는 각 실행 로그에서 확인한다. 모델 로그의 9/8은 실행 전 차단 시도이며 실제 호출 수는 TC17·TC22의 모델/handler 횟수 assert로 확인한다.
 
 공통 고정 시각은 2026-09-10 14:00 KST다. 순수 계산 예시의 SoC 40→80%, 60kWh, 48kW는 30분 추정으로 완료 14:30이다. charging_ok fixture의 원문 잔여시간은 40분으로 완료 14:40이다. 사용자 제한 30분·버퍼 5분을 주면 두 경우 모두 복귀 마감은 14:25다. 이 두 입력의 완료 시각을 혼동하지 않는다.
 
@@ -302,15 +306,15 @@ Pass는 종료 코드 0, 실패·오류·의도치 않은 skip 없음, 각 TC의
 
 실행: `python scripts/run_cases.py TC17`
 
-### TC18 확정 단계의 충전 목표 불일치
+### TC18 차량 목표 유지와 확정 재검증
 
 담당 B E · 설계 연결 C028
 
-입력: 확정 재검증에 차량 목표 100%/사용자 80%, 반대로 차량 80%/사용자 100% 주입.
+입력: 차량 목표 80%에 대화로 60%/100% 변경 시도, 원문 목표와 구형 override 충돌, 확정 전 차량 목표 90% 갱신.
 
-기대 결과: 낮은 사용자 목표는 추정 마감 14:25. 높은 사용자 목표는 차량 80% 기준 잔여시간 사용.
+기대 결과: 대화로 차량 목표를 변경하지 않음. 시간 제한만 별도 반영하며 확정 시 차량 최신 목표를 재조회. 목표 미확인은 NEED_INPUT.
 
-확인: 추천·확정의 동일 마감 및 예산 시각 assert. PR3 공통 목표 처리 포함, 실계정 API는 별도.
+확인: 차량 snapshot·예산 마감·도구 입력 스키마·강제 조회 결과 assert.
 
 실행: `python scripts/run_cases.py TC18`
 
@@ -366,11 +370,11 @@ Pass는 종료 코드 0, 실패·오류·의도치 않은 skip 없음, 각 TC의
 
 담당 A · 설계 연결 추가 회귀
 
-입력: 사용자/대화 변조, 초기화 도중 사용자 변경, 거부 입력, 이전 응답 재전송 중 새 승인 대기.
+입력: 거부 입력, 이전 승인 결과 재전송 중 새 승인 대기, 화면 새로고침, 새 대화와 보관 기록 복원.
 
-기대 결과: 소유권 확인 후 자기 기록만 표시. 거부 입력을 localStorage에 저장하지 않음. 새 request_id와 승인 화면 유지.
+기대 결과: 거부 입력은 localStorage에 저장하지 않음. request_id와 새 승인 내용 유지. 새 대화는 분리하고 기존 기록은 이어서 조회.
 
-확인: Node가 실제 페이지 script와 session.js를 실행. 저장소 접근·DOM·POST 본문 assert.
+확인: Playwright가 실제 app.js·features.js를 실행. localStorage·DOM·POST 본문·대화 ID assert.
 
 실행: `python scripts/run_cases.py TC23`
 
@@ -407,12 +411,12 @@ python scripts/web.py --fixed
 
 웹 재전송 수동 확인은 같은 브라우저 쿠키를 유지한 상태에서 개발자 도구 Network의 `/api/ask` 응답 ID를 기록하고 `/api/decide`의 JSON `{thread_id, request_id, decision}`을 같은 내용으로 재전송한다. 동일 `response`와 저장 로그 1회를 확인한다. 최상위 `request_id`는 현재 대기 승인 ID이므로 완료 후 null일 수 있다.
 
-TMAP 실연동은 TMAP_APP_KEY를 설정한 뒤 출발 충전소를 입력·선택하고 장소/경로 출처가 tmap인지 확인한다. 현대차는 B 담당자의 유효한 토큰·carId로 USE_MOCK_CHARGING=false를 설정해 관측 시각·충전 상태·잔여시간 단위를 검증한다. 자동 회귀 통과를 실계정 연동 성공으로 기록하지 않는다. 지도 UI는 준비되어 있으나 서버 map_data 연결은 완료되지 않았다.
+TMAP 실연동은 TMAP_APP_KEY를 설정한 뒤 출발 충전소를 입력·선택하고 장소/경로 출처가 tmap인지 확인한다. 현대차는 B 담당자의 유효한 토큰·carId로 USE_MOCK_CHARGING=false를 설정해 관측 시각·충전 상태·잔여시간 단위를 검증한다. 자동 회귀 통과를 실계정 연동 성공으로 기록하지 않는다. 웹 응답의 map_data로 출발지·장소·경로 요약을 지도에 연결한다.
 
 ## 6 기록과 제출
 
 실행 결과에는 일시·실행자·코드 SHA·TC/M 번호·실제 입력·기대값·실제값·판정·로그 경로·후속 조치를 남긴다. 양식은 [실행결과 기록양식](실행결과_기록양식.md)을 사용한다. 실제 수행하지 않은 수동 검사는 미실행으로 표시한다.
 
-A의 네 가지 후속 수정과 레거시 정리 범위는 [A 작업 문서](../tasks/A-runtime-hardening.md)에 있다. 충전 종료 시 이전 상태 정리, API 배치 한도, 사용자 목표 미입력 구분, 수동 잔여시간 입력, 지도 데이터 연결은 담당자 협의 항목으로 남아 있다. 이를 이 테스트 통과만으로 완료 처리하지 않는다.
+A의 입력 검사·오류 응답·승인 재전송·모델 한도 처리와 레거시 정리 내용은 [A 작업 문서](../tasks/A-runtime-hardening.md)에 있다.
 
 최종 main 병합 뒤에는 그 main에서 suite를 재실행하고 SHA와 증거를 갱신한다. 메모리 세션·승인 원장은 서버 재시작 뒤 복구되지 않으며 일반 질문의 재전송 멱등 계약은 제공하지 않는다.

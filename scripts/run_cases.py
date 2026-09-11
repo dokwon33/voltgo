@@ -45,7 +45,10 @@ def main():
     for engine in ("pytest", "node"):
         selectors = unique_selectors([s for c in selected if c["engine"] == engine for s in c["selectors"]])
         if selectors:
-            groups[engine] = ["tests"] if args.case == "suite" and engine == "pytest" else selectors
+            if args.case == "suite":
+                selectors = ["tests"] if engine == "pytest" else [
+                    str(p.relative_to(ROOT)) for p in sorted((ROOT / "web/tests").glob("*.cjs"))]
+            groups[engine] = selectors
     now = datetime.now(timezone.utc)
     out = (args.output or ROOT / "reports" / now.strftime("%Y%m%dT%H%M%S%fZ")).resolve()
     out.mkdir(parents=True, exist_ok=True)

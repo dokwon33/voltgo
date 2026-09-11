@@ -33,12 +33,6 @@ def collect_warnings(context: Context) -> list[str]:
         w.append("충전 정보는 Mock 데이터입니다")
     if s.time_budget and s.time_budget.estimate_basis == "energy_power":
         w.append("잔여시간은 배터리 용량·평균 전력 정책값으로 추정한 값입니다")
-    if s.charging and s.charging.reported_target_soc_pct is not None and s.target_soc_pct != s.charging.reported_target_soc_pct:
-        api_t, user_t = s.charging.reported_target_soc_pct, s.target_soc_pct
-        if user_t < api_t:
-            w.append(f"차량은 {api_t:.0f}%까지 자동 충전되도록 설정돼있어요. {user_t:.0f}% 충전 도달 시각은 추정치입니다.")
-        else:
-            w.append(f"차량은 {api_t:.0f}%에서 자동으로 충전이 멈추도록 설정돼있어요. {user_t:.0f}%까지 채우려면 차량 앱에서 직접 목표를 올려주세요.")
     if s.places and all(p.poi_source == "mock" for p in s.places.values()):
         w.append("장소 정보는 Mock 데이터입니다")
     if s.routes and all(r.route_source == "mock" for r in s.routes.values()):
@@ -75,8 +69,9 @@ def render_message(context: Context, candidates, explanation: str, status: str) 
     lines = []
     if s.time_budget:
         b = s.time_budget
+        available_sec = max(int((b.return_deadline - context.clock()).total_seconds()), 0)
         lines.append(f"충전 완료 예정 {b.finish_at:%H:%M}, 복귀 마감 {b.return_deadline:%H:%M} "
-                     f"(버퍼 {b.buffer_min}분, 가용 {b.available_sec // 60}분)")
+                     f"(버퍼 {b.buffer_min}분, 가용 {available_sec // 60}분)")
     for i, c in enumerate(candidates, 1):
         lines.append(f"{i}) {c.name} — 도보 편도 {c.outbound_sec // 60}분, 체류 {c.dwell_sec // 60}분 "
                      f"→ {c.return_at:%H:%M} 복귀 (여유 {c.slack_sec // 60}분), 늦어도 {c.leave_by:%H:%M} 출발")

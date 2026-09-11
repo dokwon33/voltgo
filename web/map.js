@@ -6,7 +6,7 @@
     if (window.Tmapv2?.Map) return Promise.resolve(window.Tmapv2);
     if (sdkPromise) return sdkPromise;
     const key = window.VOLTGO_MAP_CONFIG?.appKey?.trim();
-    if (!key) return Promise.reject(new Error('지도 서비스를 준비 중이에요. 잠시 후 다시 확인해 주세요.'));
+    if (!key) return window.loadVoltGoOpenMap();
     sdkPromise = new Promise((resolve, reject) => {
       const script = document.createElement('script');
       script.src = 'https://apis.openapi.sk.com/tmap/jsv2?version=1&appKey=' + encodeURIComponent(key);
@@ -58,6 +58,10 @@
       this.resizeObserver.observe(panel.querySelector('.map-stage'));
       panel.querySelector('.map-retry').addEventListener('click', () => this.render());
       panel.querySelector('.map-fit').addEventListener('click', () => this.fit());
+      panel.querySelector('.map-tile-retry').addEventListener('click', () => {
+        panel.querySelector('.map-tile-status').hidden = true;
+        this.map?.retryTiles?.();
+      });
       panel.querySelectorAll('[data-direction]').forEach((button) => button.addEventListener('click', () => {
         this.direction = button.dataset.direction;
         this.render();
@@ -67,14 +71,20 @@
     register(response, data) {
       const candidates = response?.candidates || [];
       const snapshot = data && typeof data === 'object' ? data : {};
-      return candidates.map((candidate) => {
+      // Labels belong to this recommendation snapshot. A confirmed B stays B.
+      const labels = candidates.map((candidate, index) => {
+        const previous = response.status === 'confirmed' && [...this.entries.values()].reverse().find(entry =>
+          entry.candidate.plan_id === candidate.plan_id && entry.candidate.version === candidate.version);
+        return previous?.label || String.fromCharCode(65 + index);
+      });
+      return candidates.map((candidate, index) => {
         const key = 'map-' + (++this.counter);
-        this.entries.set(key, { candidate, candidates, data: snapshot });
+        this.entries.set(key, { candidate, candidates, data: snapshot, label: labels[index], labels });
         return key;
       });
     }
 
-    select(key, scroll = false) {
+    select(key, scroll = false, record = true) {
       if (!this.entries.has(key)) return;
       this.selected = key;
       this.panel.hidden = false;
@@ -84,6 +94,7 @@
         button.closest('.plan')?.classList.toggle('map-selected', active);
       });
       this.render();
+      if (record) this.onSelect?.();
       if (scroll) this.panel.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
     }
 
@@ -99,51 +110,88 @@
       this.panel.querySelector('.map-retry').hidden = !retry;
       this.canvas.hidden = true;
       this.panel.querySelector('.map-fit').disabled = true;
+      this.panel.querySelector('.map-fit').hidden = true;
+      this.panel.querySelector('.map-controls').hidden = true;
+      this.panel.querySelector('.map-tile-status').hidden = true;
+    }
+
+    overview(data) {
+      this.overviewData = data || {};
+      this.selected = null;
+      this.panel.hidden = false;
+      this.render();
     }
 
     async render() {
       const revision = ++this.revision;
       const entry = this.entries.get(this.selected);
-      if (!entry) return;
+      if (!entry && !this.overviewData) return;
       this.clearOverlays();
-      const { candidate, candidates, data } = entry;
+      const { candidate, candidates, data, label, labels } = entry || {candidate: null, candidates: [], data: this.overviewData, label: '', labels: []};
+      this.panel.querySelector('.map-start').hidden = Boolean(entry);
+      const choices = this.panel.querySelector('.map-places');
+      choices.replaceChildren();
+      candidates.forEach((place, index) => {
+        const match = [...this.entries].find(([, e]) => e.data === data && e.candidate === place);
+        if (!match) return;
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.dataset.mapChoice = match[0];
+        button.textContent = `${labels[index]} · ${place.name}`;
+        button.setAttribute('aria-pressed', String(match[0] === this.selected));
+        button.addEventListener('click', () => this.select(match[0]));
+        choices.append(button);
+      });
       const places = Array.isArray(data.places) ? data.places : [];
       const routes = Array.isArray(data.routes) ? data.routes : [];
-      const place = places.find((p) => p?.poi_id === candidate.poi_id);
+      const place = candidate && places.find((p) => p?.poi_id === candidate.poi_id);
       const origin = point(data.origin), destination = point(place);
-      this.panel.querySelector('.map-place').textContent = candidate.name;
+      this.panel.querySelector('.map-place').textContent = candidate ? `${label} · ${candidate.name}` : data.origin?.name || '근처 추천 장소';
       this.panel.querySelector('.map-note').textContent = '';
       this.panel.querySelectorAll('[data-direction]').forEach((button) => {
         button.setAttribute('aria-pressed', String(button.dataset.direction === this.direction));
       });
       if (!origin && !destination) {
-        this.message('장소 위치를 아직 받지 못했어요. 위치가 준비되면 지도에서 볼 수 있어요.');
+        this.message(candidate ? '장소 위치를 아직 받지 못했어요. 위치가 준비되면 지도에서 볼 수 있어요.' : '출발 충전소를 알려 주세요. 위치를 확인하면 주변 지도를 보여드릴게요.');
         return;
       }
       this.message('지도를 불러오는 중이에요…');
       try {
         const T = await loadSDK();
         if (revision !== this.revision) return;
+        this.sdk = T;
         this.canvas.hidden = false;
         if (!this.map) {
           const center = origin || destination;
           this.map = new T.Map(this.canvas.id, { center: new T.LatLng(center[1], center[0]), width: '100%', height: '100%', zoom: 16, zoomControl: true, scrollwheel: false, httpsMode: true });
+          this.map.onTileStatus = text => {
+            if (this.panel.hidden || this.canvas.hidden) return;
+            this.panel.querySelector('.map-tile-status p').textContent = text;
+            this.panel.querySelector('.map-tile-status').hidden = !text;
+          };
         }
         this.map.resize('100%', '100%');
         this.panel.querySelector('.map-empty').hidden = true;
         this.panel.querySelector('.map-fit').disabled = false;
+        this.panel.querySelector('.map-fit').hidden = false;
+        this.panel.querySelector('.map-controls').hidden = !candidate;
         const latLng = (p) => new T.LatLng(p[1], p[0]);
         const addMarker = (coords, label, color, title, onClick) => {
           const marker = new T.Marker({ position: latLng(coords), map: this.map, icon: icon(label, color), iconSize: new T.Size(32, 40), title });
           if (onClick) marker.addListener('click', onClick);
           this.overlays.push(marker);
         };
-        if (origin) { addMarker(origin, 'C', '#1B2620', '출발 충전소'); this.fitPoints.push(origin); }
+        if (origin) { addMarker(origin, '⚡', '#1B2620', '출발 충전소'); this.fitPoints.push(origin); }
+        if (!candidate) {
+          this.panel.querySelector('.map-note').textContent = '출발 충전소 주변이에요. 장소를 추천받으면 지도에서 함께 볼 수 있어요.';
+          this.fit();
+          return;
+        }
         candidates.forEach((c, index) => {
           const p = places.find((p) => p?.poi_id === c.poi_id), coords = point(p);
           if (!coords) return;
           const selected = c.plan_id === candidate.plan_id;
-          addMarker(coords, index + 1, selected ? '#2A8A57' : '#718B7C', `추천 장소 ${index + 1}`, () => {
+          addMarker(coords, labels[index], selected ? '#2A8A57' : '#718B7C', `${labels[index]} · ${c.name}`, () => {
             const match = [...this.entries].find(([, e]) => e.data === data && e.candidate === c);
             if (match) this.select(match[0]);
           });
@@ -153,8 +201,6 @@
         const notes = [];
         if (!origin) notes.push('충전소 위치 미제공');
         if (!destination) notes.push('선택한 장소 위치 미제공');
-        if (candidate.poi_source === 'mock' || data.origin?.source === 'mock' || place?.poi_source === 'mock') notes.push('예시 위치');
-        if (route?.route_source === 'mock' || candidate.route_source === 'mock') notes.push('예시 경로');
         for (const [direction, label, color] of [['outbound', '가는 길', '#2A8A57'], ['inbound', '오는 길', '#5369C5']]) {
           if (this.direction !== 'both' && this.direction !== direction) continue;
           const lines = segments(route?.[direction]);
@@ -165,7 +211,7 @@
             this.fitPoints.push(...line);
           }
         }
-        this.panel.querySelector('.map-note').textContent = notes.length ? notes.join(' · ') : '충전소 C에서 출발해 선택한 장소까지 다녀오는 도보 경로예요.';
+        this.panel.querySelector('.map-note').textContent = notes.length ? notes.join(' · ') : '충전소 ⚡에서 출발해 선택한 장소까지 다녀오는 도보 경로예요.';
         this.fit();
       } catch (error) {
         if (revision !== this.revision) return;
@@ -176,7 +222,7 @@
 
     fit() {
       if (!this.map || !this.fitPoints?.length) return;
-      const T = window.Tmapv2;
+      const T = this.sdk;
       const [lon, lat] = this.fitPoints[0];
       if (this.fitPoints.every((p) => p[0] === lon && p[1] === lat)) {
         this.map.setCenter(new T.LatLng(lat, lon)); this.map.setZoom(16); return;
@@ -190,12 +236,17 @@
       ++this.revision;
       this.clearOverlays();
       this.panel.hidden = true;
+      document.querySelectorAll('[data-map-key]').forEach((button) => {
+        button.setAttribute('aria-pressed', 'false');
+        button.closest('.plan')?.classList.remove('map-selected');
+      });
     }
 
     reset() {
       this.hide();
       this.entries.clear();
       this.selected = null;
+      this.overviewData = null;
       this.direction = 'both';
     }
   }

@@ -48,7 +48,7 @@ def test_c004_missing_values_need_input(snapshot, now):
 
 
 def test_missing_target_needs_input(snapshot, now):
-    # 목표 SoC 가 아예 없으면 (API 도 못 주고 사용자도 말 안 함) 비교/추정 없이 NEED_INPUT
+    # 차량 목표가 없으면 비교/추정 없이 재조회. 사용자 대화로 보충하지 않는다.
     snap = snapshot.model_copy(update={"target_soc_pct": None})
     assert calculate_time_budget(snap, now) == (None, "NEED_INPUT")
 

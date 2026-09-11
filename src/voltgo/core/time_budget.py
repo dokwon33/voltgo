@@ -44,9 +44,10 @@ def calculate_time_budget(
     # 1. 충전 중이 아니거나 이미 목표에 도달 -> 외출 계획 없음 (C003)
     if snapshot.charging is False:
         return None, "NOT_CHARGING"
-    if snapshot.target_soc_pct is None:
-        return None, "NEED_INPUT"     # 목표를 모르면 비교/추정하지 않고 질문
-    if snapshot.soc_pct is not None and snapshot.soc_pct >= snapshot.target_soc_pct:
+    target_soc_pct = snapshot.vehicle_target_soc_pct
+    if target_soc_pct is None or not math.isfinite(target_soc_pct) or not 0 < target_soc_pct <= 100:
+        return None, "NEED_INPUT"     # 차량 목표를 모르면 재조회. 대화의 목표값으로 대체하지 않는다.
+    if snapshot.soc_pct is not None and snapshot.soc_pct >= target_soc_pct:
         return None, "TARGET_REACHED"
 
     # 2. 너무 오래된 값이면 다시 조회하라고 알려준다
@@ -61,7 +62,7 @@ def calculate_time_budget(
         basis = "reported_remaining"
     else:
         remaining_sec = estimate_remaining_sec(
-            snapshot.soc_pct, snapshot.target_soc_pct, snapshot.capacity_kwh, snapshot.avg_power_kw
+            snapshot.soc_pct, target_soc_pct, snapshot.capacity_kwh, snapshot.avg_power_kw
         )
         basis = "energy_power"
         if remaining_sec is None:

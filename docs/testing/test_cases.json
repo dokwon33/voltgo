@@ -256,16 +256,14 @@
   },
   {
     "id": "TC18",
-    "title": "확정 단계의 충전 목표 불일치",
+    "title": "차량 목표 유지와 확정 재검증",
     "design": "C028",
     "owner": "B E",
-    "input": "확정 재검증에 차량 목표 100%/사용자 80%, 반대로 차량 80%/사용자 100% 주입.",
-    "expected": "낮은 사용자 목표는 추정 마감 14:25. 높은 사용자 목표는 차량 80% 기준 잔여시간 사용.",
-    "check": "추천·확정의 동일 마감 및 예산 시각 assert. PR3 공통 목표 처리 포함, 실계정 API는 별도.",
+    "input": "차량 목표 80%에 대화로 60%/100% 변경 시도, 원문 목표와 구형 override 충돌, 확정 전 차량 목표 90% 갱신.",
+    "expected": "대화로 차량 목표를 변경하지 않음. 시간 제한만 별도 반영하며 확정 시 차량 최신 목표를 재조회. 목표 미확인은 NEED_INPUT.",
+    "check": "차량 snapshot·예산 마감·도구 입력 스키마·강제 조회 결과 assert.",
     "selectors": [
-      "tests/test_approval.py::test_사용자_목표가_차량_목표보다_낮으면_재검증도_원문_잔여시간을_쓰지_않는다",
-      "tests/test_approval.py::test_사용자_목표가_차량_목표보다_높으면_차량_목표에서_멈추는_것으로_재검증한다",
-      "tests/test_tools.py::test_c028_target_mismatch_deadline_survives_confirm"
+      "tests/test_vehicle_target.py"
     ],
     "engine": "pytest"
   },
@@ -330,11 +328,13 @@
     "title": "브라우저 기록과 승인 화면 복원",
     "design": "추가 회귀",
     "owner": "A",
-    "input": "사용자/대화 변조, 초기화 도중 사용자 변경, 거부 입력, 이전 응답 재전송 중 새 승인 대기.",
-    "expected": "소유권 확인 후 자기 기록만 표시. 거부 입력을 localStorage에 저장하지 않음. 새 request_id와 승인 화면 유지.",
-    "check": "Node가 실제 페이지 script와 session.js를 실행. 저장소 접근·DOM·POST 본문 assert.",
+    "input": "거부 입력, 이전 승인 결과 재전송 중 새 승인 대기, 화면 새로고침, 새 대화와 보관 기록 복원.",
+    "expected": "거부 입력은 localStorage에 저장하지 않음. request_id와 새 승인 내용 유지. 새 대화는 분리하고 기존 기록은 이어서 조회.",
+    "check": "Playwright가 실제 app.js·features.js를 실행. localStorage·DOM·POST 본문·대화 ID assert.",
     "selectors": [
-      "tests/test_web_history.cjs"
+      "web/tests/runtime.cjs",
+      "web/tests/features.cjs",
+      "web/tests/new-chat.cjs"
     ],
     "engine": "node"
   }
