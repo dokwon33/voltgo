@@ -12,6 +12,7 @@ from typing import Optional
 from langchain.tools import ToolRuntime, tool
 
 from voltgo.agent import memory
+from voltgo.agent.alternative_agent import assess_time_shortage_alternatives
 from voltgo.agent.schemas import (
     Category, ConfirmedPlan, DeleteResult, ToolResult, tool_error,
 )
@@ -503,6 +504,7 @@ TOOLS = [
     confirm_plan,
     save_preferences,
     delete_preferences,
+    assess_time_shortage_alternatives,
 ]
 
 # 읽기 도구 / 쓰기 도구 구분 (미들웨어 재시도·승인 정책용)
