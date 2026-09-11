@@ -13,7 +13,7 @@ from langchain.tools import ToolRuntime, tool
 
 from voltgo.agent import memory
 from voltgo.agent.schemas import (
-    Category, ConfirmedPlan, DeleteResult, PreferenceRecord, ToolResult, tool_error,
+    Category, ConfirmedPlan, DeleteResult, ToolResult, tool_error,
 )
 from voltgo.clients import ClientError
 from voltgo.core import feasibility
@@ -461,15 +461,9 @@ def save_preferences(runtime: ToolRuntime, category: Optional[Category] = None,
     if requested_at is not None and (now - requested_at).total_seconds() > APPROVAL_TTL_SEC:
         return tool_error("APPROVAL_EXPIRED", "승인 대기가 2분을 넘었습니다. 저장하려면 다시 요청해 주세요.")
 
-    old = memory.load_preferences(ctx.user_id)
-    record = PreferenceRecord(
-        user_id=ctx.user_id,
-        preferred_category=category if category is not None else (old.preferred_category if old else None),
-        dwell_min=dwell_min if dwell_min is not None else (old.dwell_min if old else None),
-        consent_at=now,
-    )
     try:
-        memory.save_preferences(record)
+        record = memory.update_preferences(ctx.user_id, category=category,
+                                           dwell_min=dwell_min, consent_at=now)
     except OSError as e:
         # 실패했으면 기억했다고 말하면 안 된다
         return tool_error("STORE_ERROR", f"저장 실패: {type(e).__name__}")

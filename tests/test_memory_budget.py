@@ -160,3 +160,50 @@ def test_새_프로세스에서도_다른_사용자_선호는_안_보인다(tmp_
     memory.save_preferences(_rec("u1", "cafe"))
 
     assert _run_child(memory.PREF_DIR, "u2") == "NONE"
+
+
+@pytest.mark.parametrize("failure_stage", ["write", "replace"])
+def test_저장_실패시_이전_기록을_보존하고_임시파일을_정리한다(monkeypatch, failure_stage):
+    previous = _rec("u1", "cafe")
+    memory.save_preferences(previous)
+
+    if failure_stage == "write":
+        def fail_dump(data, file, **kwargs):
+            file.write('{"partial":')
+            raise OSError("disk full")
+
+        monkeypatch.setattr(memory.json, "dump", fail_dump)
+    else:
+        def fail_replace(src, dst):
+            raise PermissionError("replace denied")
+
+        monkeypatch.setattr(memory.os, "replace", fail_replace)
+
+    with pytest.raises(OSError):
+        memory.update_preferences("u1", category="mart", consent_at=previous.consent_at)
+
+    assert memory.load_preferences("u1") == previous
+    assert list(memory.PREF_DIR.glob("*.tmp")) == []
+
+
+def test_다른_사용자_갱신은_동시에_진행할_수_있다(monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    barrier = Barrier(2, timeout=5)
+    save = memory.save_preferences
+
+    def overlap(record):
+        barrier.wait()
+        return save(record)
+
+    monkeypatch.setattr(memory, "save_preferences", overlap)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(memory.update_preferences, uid, category=category,
+                               consent_at=datetime.now(timezone.utc))
+                   for uid, category in [("u1", "cafe"), ("u2", "mart")]]
+        for future in futures:
+            future.result(timeout=10)
+
+    assert memory.load_preferences("u1").preferred_category == "cafe"
+    assert memory.load_preferences("u2").preferred_category == "mart"

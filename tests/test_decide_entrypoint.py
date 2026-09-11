@@ -162,3 +162,38 @@ def test_재개_중_모델_한도에_걸리면_오류_응답으로_돌려준다(
     context.session.counters["model"] = MAX_MODEL_CALLS
     r = decide(agent, "approve", context, "budget")
     assert r.status == "error" and "LIMIT_EXCEEDED" in r.message
+
+
+@pytest.mark.parametrize("start_together", [False, True], ids=["normal", "parallel-start"])
+def test_복수_저장을_모두_승인하면_두_필드가_모두_남는다(context, monkeypatch, start_together):
+    from threading import Barrier
+
+    if start_together:
+        # 갱신 진입을 동시에 시작한다. 읽기/쓰기 내부는 저장소가 직렬화해야 한다.
+        barrier = Barrier(2, timeout=5)
+        update = memory.update_preferences
+
+        def concurrent_update(*args, **kwargs):
+            barrier.wait()
+            return update(*args, **kwargs)
+
+        monkeypatch.setattr(memory, "update_preferences", concurrent_update)
+
+    agent = _agent([
+        _ai([_save(tid="category"),
+             _tc("save_preferences", {"dwell_min": 15}, "dwell")]),
+        _done(),
+    ])
+    response = ask(agent, "카페 선호와 체류 15분을 기억해줘", context, "both-fields")
+    assert response.status == "awaiting_approval"
+    assert memory.load_preferences(context.user_id) is None
+
+    decide(agent, "approve", context, "both-fields")
+    results = _tool_results(agent, "both-fields", "save_preferences")
+    assert len(results) == 2
+    assert all(result["status"] == "ok" for result in results), results
+    record = memory.load_preferences(context.user_id)
+    assert record.preferred_category == "cafe"
+    assert record.dwell_min == 15
+    assert record.consent_at == context.clock()
+    assert context.session.approval_requested_at is None
