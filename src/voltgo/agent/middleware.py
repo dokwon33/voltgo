@@ -16,6 +16,7 @@ from langchain.agents.middleware import after_agent, before_agent, wrap_model_ca
 from langchain.messages import AIMessage, SystemMessage, ToolMessage
 
 from voltgo.agent import memory
+from voltgo.agent.alternative_agent import guard_alternative_search
 from voltgo.agent.prompts import preference_note
 from voltgo.agent.schemas import tool_error
 from voltgo.agent.tools import READ_TOOLS, TOOLS
@@ -135,6 +136,12 @@ def tool_policy(request, handler):
         return _blocked(request, "LIMIT_EXCEEDED", "Tool 호출 한도(12회) 초과. 확인된 사실만 안내하세요.")
     if name in READ_TOOLS and s.counters["api"] >= MAX_API_CALLS:
         return _blocked(request, "LIMIT_EXCEEDED", "외부 API 호출 한도 초과")
+
+    # 평소 검색에는 영향이 없고, 대체 활동 판정 ToolMessage가 있는 동안만 실행 시점을 제한한다.
+    if name == "search_nearby_places":
+        blocked = guard_alternative_search(request.state.get("messages", []), args.get("category"))
+        if blocked:
+            return _blocked(request, *blocked)
 
     # 2. 실행. 선행 조건 검사는 각 도구 안에서 PRECONDITION_FAILED 로 처리한다.
     result = handler(request)
