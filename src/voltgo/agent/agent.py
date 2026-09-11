@@ -11,7 +11,7 @@ from langchain.agents.structured_output import ToolStrategy
 from langchain.chat_models import init_chat_model
 from langgraph.checkpoint.memory import InMemorySaver
 
-from voltgo.agent.approval import approval_middleware, resume_command
+from voltgo.agent.approval import approval_middleware, mark_approval_requested, resume_command
 from voltgo.agent.assembler import assemble, error_response
 from voltgo.agent.middleware import (
     input_validation, model_budget, output_integrity, preference_prompt, tool_policy,
@@ -48,6 +48,7 @@ def build_agent(model=None, checkpointer=None):
             preference_prompt,      # wrap_model_call
             model_budget,           # wrap_model_call
             tool_policy,            # wrap_tool_call
+            mark_approval_requested,  # after_model - 승인 요청 시각 기록 (HITL 보다 먼저)
             approval_middleware(),  # after_model (HITL)
             output_integrity,       # after_agent
         ],
