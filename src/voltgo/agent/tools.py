@@ -49,9 +49,10 @@ def get_charging_status(runtime: ToolRuntime, force_refresh: bool = False) -> di
     s = ctx.session
     now = ctx.clock()
 
-    # 60초 안이면 캐시 재사용
+    # 60초 안이면 캐시 재사용 (fetched_at 기준, 차량 전송 지연과 무관하게 우리가 조회한 시점으로 판단)
     if s.charging and not force_refresh:
-        age = (now - s.charging.observed_at).total_seconds()
+        freshness_ref = s.charging.fetched_at or s.charging.observed_at
+        age = (now - freshness_ref).total_seconds()
         if age <= STALE_AFTER_SEC:
             return ToolResult(status="ok", data=s.charging, source=s.charging.source,
                               observed_at=s.charging.observed_at, message="캐시(60초 이내)").dump()
@@ -74,17 +75,33 @@ def get_charging_status(runtime: ToolRuntime, force_refresh: bool = False) -> di
                       message=f"charging={snap.charging}, soc={snap.soc_pct}%, plug={snap.plug_type}").dump()
 
 
+def _apply_target_soc(charging, target_soc_pct: float):
+    """요청한 목표(target_soc_pct)와 차량이 실제로 설정한 목표(reported_target_soc_pct)가
+    다르면 방향에 따라 계산용 snapshot을 보정한다 (2.5.2, C028).
+    calculate_time_budget 과 confirm_plan 재검증이 같은 결과를 내도록 여기서만 처리한다.
+    사용자에게 보여줄 경고문은 assembler.collect_warnings 가 Session 값에서 별도로 다시 만든다.
+    """
+    api_target = charging.reported_target_soc_pct
+    if api_target is None or target_soc_pct == api_target:
+        return charging.model_copy(update={"target_soc_pct": target_soc_pct})
+    if target_soc_pct < api_target:
+        # 충전 경로상 반드시 지나가는 지점 -> 에너지 추정으로 전환 (remainTime 은 api_target 기준이라 못 믿는다)
+        return charging.model_copy(update={"target_soc_pct": target_soc_pct, "reported_remaining_sec": None})
+    # 차량이 api_target 에서 자동으로 멈춘다 -> 사용자 목표는 도달 불가, API 값 그대로 쓴다
+    return charging.model_copy(update={"target_soc_pct": api_target})
+
+
 # ---------------------------------------------------------------
 # 2. 시간 예산
 # ---------------------------------------------------------------
 @tool
-def calculate_time_budget(runtime: ToolRuntime, target_soc_pct: float = 80,
+def calculate_time_budget(runtime: ToolRuntime, target_soc_pct: Optional[float] = None,
                           user_limit_min: Optional[int] = None) -> dict:
     """검증된 충전 정보와 사용자의 시간 제한으로 복귀 마감 시각과 지금 남은 가용 시간(초)을 계산합니다.
     get_charging_status 다음에 호출합니다.
 
     Args:
-        target_soc_pct: 목표 충전량(%). 기본 80
+        target_soc_pct: 목표 충전량(%). 사용자가 말한 값. 없으면 차량 설정값을 쓰고, 그것도 없으면 질문합니다.
         user_limit_min: 사용자가 말한 시간 제한(분). "30분 있어" -> 30. 없으면 None
     """
     ctx = runtime.context
@@ -93,6 +110,14 @@ def calculate_time_budget(runtime: ToolRuntime, target_soc_pct: float = 80,
 
     if s.charging is None:
         return tool_error("PRECONDITION_FAILED", "get_charging_status 를 먼저 호출하세요")
+
+    api_target = s.charging.reported_target_soc_pct   # 차량이 실제로 설정한 목표 원문값 (API 미제공이면 None)
+
+    if target_soc_pct is None:
+        if api_target is None:
+            return tool_error("NEED_INPUT", "목표 충전량을 몇 %로 할지 사용자에게 물어보세요.")
+        target_soc_pct = api_target          # 사용자가 말 안 하면 차량 설정 그대로 쓴다
+
     if not (0 < target_soc_pct <= 100):
         return tool_error("NEED_INPUT", "목표 SoC 는 0~100 사이여야 합니다")
     if user_limit_min is not None and user_limit_min <= 0:
@@ -107,7 +132,8 @@ def calculate_time_budget(runtime: ToolRuntime, target_soc_pct: float = 80,
         s.user_limit_min = user_limit_min
         s.limit_said_at = now       # 제한을 말한 시각 기준으로 마감을 잡는다
 
-    snap = s.charging.model_copy(update={"target_soc_pct": target_soc_pct})
+    snap = _apply_target_soc(s.charging, target_soc_pct)
+
     # 같은 이름의 도구 함수와 겹치지 않게 모듈 경로로 부른다
     budget, err = time_budget.calculate_time_budget(snap, now, buffer_min=ctx.buffer_min,
                                                     user_limit_min=s.user_limit_min, limit_said_at=s.limit_said_at)
@@ -161,6 +187,9 @@ def find_station(runtime: ToolRuntime, keyword: str, station_id: Optional[str] =
             return tool_error("PRECONDITION_FAILED", "직전 검색 후보에 없는 station_id 입니다. 먼저 keyword 로 검색하세요.")
         _set_origin(s, picked)
         return ToolResult(status="ok", data=picked, source=picked.source, message=f"출발지 설정: {picked.name}").dump()
+
+    # 새 검색을 시작하면 이전 후보는 무효. 결과 없음·API 오류로 끝나도 옛 station_id 가 선택되면 안 된다
+    s.station_candidates = {}
 
     if not keyword.strip():
         return tool_error("NEED_INPUT", "충전소 이름이 비어 있습니다. 사용자에게 충전소 이름을 물어보세요.")
@@ -386,7 +415,7 @@ def confirm_plan(runtime: ToolRuntime, plan_id: str, version: int) -> dict:
     except ClientError as e:
         return tool_error(e.code, str(e), retryable=e.retryable)
     budget, err = time_budget.calculate_time_budget(
-        snap.model_copy(update={"target_soc_pct": s.target_soc_pct}), now,
+        _apply_target_soc(snap, s.target_soc_pct), now,
         buffer_min=ctx.buffer_min, user_limit_min=s.user_limit_min, limit_said_at=s.limit_said_at)
     if err is not None:
         return tool_error(err, "재검증 실패. 다시 계획하세요.")

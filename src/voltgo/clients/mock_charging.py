@@ -33,5 +33,5 @@ class MockChargingProvider:
         raw = load_raw(self.fixture)
         raw["timestamp"] = self.clock().strftime("%Y%m%d%H%M%S")
         self.calls += 1
-        return parse_charging_response(raw, source="mock",
+        return parse_charging_response(raw, source="mock", fetched_at=self.clock(),
                                        capacity_kwh=self.capacity_kwh, avg_power_kw=self.avg_power_kw)
