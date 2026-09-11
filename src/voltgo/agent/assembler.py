@@ -67,8 +67,9 @@ def render_message(context: Context, candidates, explanation: str, status: str) 
     lines = []
     if s.time_budget:
         b = s.time_budget
+        available_sec = max(int((b.return_deadline - context.clock()).total_seconds()), 0)
         lines.append(f"충전 완료 예정 {b.finish_at:%H:%M}, 복귀 마감 {b.return_deadline:%H:%M} "
-                     f"(버퍼 {b.buffer_min}분, 가용 {b.available_sec // 60}분)")
+                     f"(버퍼 {b.buffer_min}분, 가용 {available_sec // 60}분)")
     for i, c in enumerate(candidates, 1):
         lines.append(f"{i}) {c.name} — 도보 편도 {c.outbound_sec // 60}분, 체류 {c.dwell_sec // 60}분 "
                      f"→ {c.return_at:%H:%M} 복귀 (여유 {c.slack_sec // 60}분), 늦어도 {c.leave_by:%H:%M} 출발")
