@@ -40,7 +40,12 @@ def test_c006_recheck_after_5_minutes(places, routes, budget, now):
     # 14:05 에 승인하면 A 복귀 14:26 > 마감 14:25 -> 확정하지 않는다
     plan = select_feasible_plans(places, routes, budget, now, version=1, dwell_overrides={"A": 12})[0]
     assert recheck_plan(plan, budget, now) is not None
-    assert recheck_plan(plan, budget, now + timedelta(minutes=5)) is None
+    approval_time = now + timedelta(minutes=5)
+    assert budget.available_sec == 1500                 # 14:00 계산 당시 값은 그대로 남아 있어도
+    assert recheck_plan(plan, budget, approval_time) is None  # 14:05 현재 시각으로 다시 판정한다
+    assert select_feasible_plans(
+        places, routes, budget, approval_time, version=1, dwell_overrides={"A": 12}
+    ) == []
 
 
 def test_c010_missing_inbound_route_excluded(places, routes, budget, now):

@@ -31,6 +31,12 @@ def collect_warnings(context: Context) -> list[str]:
         w.append("충전 정보는 Mock 데이터입니다")
     if s.time_budget and s.time_budget.estimate_basis == "energy_power":
         w.append("잔여시간은 배터리 용량·평균 전력 정책값으로 추정한 값입니다")
+    if s.charging and s.charging.reported_target_soc_pct is not None and s.target_soc_pct != s.charging.reported_target_soc_pct:
+        api_t, user_t = s.charging.reported_target_soc_pct, s.target_soc_pct
+        if user_t < api_t:
+            w.append(f"차량은 {api_t:.0f}%까지 자동 충전되도록 설정돼있어요. {user_t:.0f}% 충전 도달 시각은 추정치입니다.")
+        else:
+            w.append(f"차량은 {api_t:.0f}%에서 자동으로 충전이 멈추도록 설정돼있어요. {user_t:.0f}%까지 채우려면 차량 앱에서 직접 목표를 올려주세요.")
     if s.places and all(p.poi_source == "mock" for p in s.places.values()):
         w.append("장소 정보는 Mock 데이터입니다")
     if s.routes and all(r.route_source == "mock" for r in s.routes.values()):

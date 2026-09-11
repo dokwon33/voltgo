@@ -50,9 +50,10 @@ def get_charging_status(runtime: ToolRuntime, force_refresh: bool = False) -> di
     s = ctx.session
     now = ctx.clock()
 
-    # 60초 안이면 캐시 재사용
+    # 60초 안이면 캐시 재사용 (fetched_at 기준, 차량 전송 지연과 무관하게 우리가 조회한 시점으로 판단)
     if s.charging and not force_refresh:
-        age = (now - s.charging.observed_at).total_seconds()
+        freshness_ref = s.charging.fetched_at or s.charging.observed_at
+        age = (now - freshness_ref).total_seconds()
         if age <= STALE_AFTER_SEC:
             return ToolResult(status="ok", data=s.charging, source=s.charging.source,
                               observed_at=s.charging.observed_at, message="캐시(60초 이내)").dump()
@@ -75,17 +76,33 @@ def get_charging_status(runtime: ToolRuntime, force_refresh: bool = False) -> di
                       message=f"charging={snap.charging}, soc={snap.soc_pct}%, plug={snap.plug_type}").dump()
 
 
+def _apply_target_soc(charging, target_soc_pct: float):
+    """요청한 목표(target_soc_pct)와 차량이 실제로 설정한 목표(reported_target_soc_pct)가
+    다르면 방향에 따라 계산용 snapshot을 보정한다 (2.5.2, C028).
+    calculate_time_budget 과 confirm_plan 재검증이 같은 결과를 내도록 여기서만 처리한다.
+    사용자에게 보여줄 경고문은 assembler.collect_warnings 가 Session 값에서 별도로 다시 만든다.
+    """
+    api_target = charging.reported_target_soc_pct
+    if api_target is None or target_soc_pct == api_target:
+        return charging.model_copy(update={"target_soc_pct": target_soc_pct})
+    if target_soc_pct < api_target:
+        # 충전 경로상 반드시 지나가는 지점 -> 에너지 추정으로 전환 (remainTime 은 api_target 기준이라 못 믿는다)
+        return charging.model_copy(update={"target_soc_pct": target_soc_pct, "reported_remaining_sec": None})
+    # 차량이 api_target 에서 자동으로 멈춘다 -> 사용자 목표는 도달 불가, API 값 그대로 쓴다
+    return charging.model_copy(update={"target_soc_pct": api_target})
+
+
 # ---------------------------------------------------------------
 # 2. 시간 예산
 # ---------------------------------------------------------------
 @tool
-def calculate_time_budget(runtime: ToolRuntime, target_soc_pct: float = 80,
+def calculate_time_budget(runtime: ToolRuntime, target_soc_pct: Optional[float] = None,
                           user_limit_min: Optional[int] = None) -> dict:
     """검증된 충전 정보와 사용자의 시간 제한으로 복귀 마감 시각과 지금 남은 가용 시간(초)을 계산합니다.
     get_charging_status 다음에 호출합니다.
 
     Args:
-        target_soc_pct: 목표 충전량(%). 기본 80
+        target_soc_pct: 목표 충전량(%). 사용자가 말한 값. 없으면 차량 설정값을 쓰고, 그것도 없으면 질문합니다.
         user_limit_min: 사용자가 말한 시간 제한(분). "30분 있어" -> 30. 없으면 None
     """
     ctx = runtime.context
@@ -94,6 +111,14 @@ def calculate_time_budget(runtime: ToolRuntime, target_soc_pct: float = 80,
 
     if s.charging is None:
         return tool_error("PRECONDITION_FAILED", "get_charging_status 를 먼저 호출하세요")
+
+    api_target = s.charging.reported_target_soc_pct   # 차량이 실제로 설정한 목표 원문값 (API 미제공이면 None)
+
+    if target_soc_pct is None:
+        if api_target is None:
+            return tool_error("NEED_INPUT", "목표 충전량을 몇 %로 할지 사용자에게 물어보세요.")
+        target_soc_pct = api_target          # 사용자가 말 안 하면 차량 설정 그대로 쓴다
+
     if not (0 < target_soc_pct <= 100):
         return tool_error("NEED_INPUT", "목표 SoC 는 0~100 사이여야 합니다")
     if user_limit_min is not None and user_limit_min <= 0:
@@ -108,7 +133,8 @@ def calculate_time_budget(runtime: ToolRuntime, target_soc_pct: float = 80,
         s.user_limit_min = user_limit_min
         s.limit_said_at = now       # 제한을 말한 시각 기준으로 마감을 잡는다
 
-    snap = s.charging.model_copy(update={"target_soc_pct": target_soc_pct})
+    snap = _apply_target_soc(s.charging, target_soc_pct)
+
     # 같은 이름의 도구 함수와 겹치지 않게 모듈 경로로 부른다
     budget, err = time_budget.calculate_time_budget(snap, now, buffer_min=ctx.buffer_min,
                                                     user_limit_min=s.user_limit_min, limit_said_at=s.limit_said_at)
@@ -256,10 +282,23 @@ def get_walking_routes(runtime: ToolRuntime, poi_ids: list[str]) -> dict:
     unknown = [p for p in poi_ids if p not in s.places]
     if unknown:
         return tool_error("PRECONDITION_FAILED", f"등록되지 않은 poi_id: {unknown}")
+    poi_ids = list(dict.fromkeys(poi_ids))[:MAX_ROUTE_CANDIDATES]
+    if not poi_ids:
+        return tool_error("PRECONDITION_FAILED", "경로를 조회할 poi_id가 없습니다")
+
+    # 경로가 갱신되면 이전 경로로 만든 후보와 확정은 더 이상 유효하지 않다.
+    if s.candidates or s.confirmed or s.confirmed_by_request:
+        s.bump_version()
+    s.candidates = {}
+    s.confirmed = None
+    s.confirmed_by_request = {}
+    s.selected_ran = False
+
+    # 같은 ID를 중복 호출하지 않고, 이번 조회 결과만 다음 판정에 사용한다.
+    s.routes = {}
     if ctx.routes_client is None:
         return tool_error("AUTH_ERROR", "경로 API 설정이 없습니다")
 
-    poi_ids = poi_ids[:MAX_ROUTE_CANDIDATES]
     ok, failed = [], []
     for pid in poi_ids:
         try:
@@ -267,7 +306,7 @@ def get_walking_routes(runtime: ToolRuntime, poi_ids: list[str]) -> dict:
             s.routes[pid] = trip
             ok.append(trip)
         except ClientError as e:
-            failed.append(pid)               # 한 방향만 실패해도 후보 제외 (편도 x2 금지)
+            failed.append((pid, e))           # 한 방향만 실패해도 후보 제외 (편도 x2 금지)
             if e.code in ("AUTH_ERROR", "RATE_LIMIT"):
                 return tool_error(e.code, str(e), retryable=e.retryable)
         s.counters["api"] += 2
@@ -275,10 +314,14 @@ def get_walking_routes(runtime: ToolRuntime, poi_ids: list[str]) -> dict:
     if ok and ok[0].route_source == "mock":
         s.warnings.append("보행 경로는 Mock 데이터입니다")
     if failed:
-        s.warnings.append(f"경로 조회 실패로 제외된 후보: {', '.join(failed)}")
+        failed_ids = [pid for pid, _ in failed]
+        s.warnings.append(f"경로 조회 실패로 제외된 후보: {', '.join(failed_ids)}")
 
     if not ok:
-        return tool_error("ROUTE_PARSE", "모든 후보의 경로 조회에 실패했습니다")
+        # 앞선 후보가 파싱 실패여도 다른 후보의 일시 오류를 보존해 middleware가 재시도하게 한다.
+        error = next((e for _, e in failed if e.retryable), failed[0][1])
+        return tool_error(error.code, "모든 후보의 경로 조회에 실패했습니다",
+                          retryable=error.retryable)
     status = "partial" if failed else "ok"
     return ToolResult(status=status, data=ok, source=ok[0].route_source,
                       message=f"성공 {len(ok)}개, 실패 {len(failed)}개").dump()
@@ -373,17 +416,8 @@ def confirm_plan(runtime: ToolRuntime, plan_id: str, version: int) -> dict:
         snap = _fetch_charging(ctx) if ctx.charging_provider else s.charging
     except ClientError as e:
         return tool_error(e.code, str(e), retryable=e.retryable)
-    # 추천 단계와 같은 목표 규칙을 재검증에도 적용한다. 원문 잔여시간은 '차량이 설정한 목표' 기준이라
-    # 사용자 목표가 그보다 낮으면 못 쓰고(추정으로), 높으면 차량 목표에서 충전이 멈춘다.
-    update = {"target_soc_pct": s.target_soc_pct}
-    api_target = getattr(snap, "reported_target_soc_pct", None)
-    if api_target is not None:
-        if s.target_soc_pct < api_target:
-            update["reported_remaining_sec"] = None
-        elif s.target_soc_pct > api_target:
-            update["target_soc_pct"] = api_target
     budget, err = time_budget.calculate_time_budget(
-        snap.model_copy(update=update), now,
+        _apply_target_soc(snap, s.target_soc_pct), now,
         buffer_min=ctx.buffer_min, user_limit_min=s.user_limit_min, limit_said_at=s.limit_said_at)
     if err is not None:
         return tool_error(err, "재검증 실패. 다시 계획하세요.")
