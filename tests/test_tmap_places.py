@@ -289,3 +289,35 @@ def test_search_widen_to_1000_finds_far_cafe(context):
     assert r["status"] == "ok" and r["data"] == []          # 500m 안에는 카페 없음 -> 정상 빈 결과
     r = tools.search_nearby_places.func(rt(context), category="cafe", max_dist_m=1000)
     assert [p["poi_id"] for p in r["data"]] == ["D"]
+
+
+# ---------------------------------------------------------------
+# 도구: 반경 자동 조정
+# ---------------------------------------------------------------
+def _budget_no_limit(context):
+    # mock 잔여 40분, 사용자 제한 없음 -> 마감 14:35, 가용 35분
+    tools.get_charging_status.func(rt(context))
+    tools.calculate_time_budget.func(rt(context))
+
+
+def test_auto_radius_widens_when_time_is_ample(context):
+    _budget_no_limit(context)
+    # 카페 기본 체류 15분 -> 편도 10분 -> 540m : 714m 떨어진 카페 D 는 아직 밖
+    r = tools.search_nearby_places.func(rt(context), category="cafe")
+    assert r["data"] == [] and "540m" in r["message"] and "자동" in r["message"]
+    # 사용자가 "5분이면 돼" -> 편도 15분 -> 810m : D 가 들어온다
+    r = tools.search_nearby_places.func(rt(context), category="cafe", dwell_min=5)
+    assert [p["poi_id"] for p in r["data"]] == ["D"]
+    assert context.places_client.calls == 2
+
+
+def test_explicit_max_dist_wins_over_auto(context):
+    _budget_no_limit(context)
+    r = tools.search_nearby_places.func(rt(context), category="cafe", dwell_min=5, max_dist_m=500)
+    assert r["data"] == [] and "지정값" in r["message"]
+
+
+def test_bad_dwell_rejected_before_call(context):
+    _budget_no_limit(context)
+    r = tools.search_nearby_places.func(rt(context), category="meal", dwell_min=0)
+    assert r["error_code"] == "NEED_INPUT" and context.places_client.calls == 0

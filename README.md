@@ -12,7 +12,7 @@
 | --- | --- | --- | --- |
 | A | 김보석 | 에이전트 조립·통합 | schemas 동결, 도구 스텁으로 루프 완성, pytest 하네스, 통합 리드 |
 | B | 조영우 | 현대차 API | OAuth·충전 상태 실호출 (안 되면 Mock) · `get_charging_status`, `calculate_time_budget` |
-| C | 이도권 | TMAP 장소 | 주변검색·통합검색, 카테고리 매핑·500m 필터 · `search_nearby_places`, `find_station` |
+| C | 이도권 | TMAP 장소 | 주변검색·통합검색, 카테고리 매핑·반경 필터(남은 시간 기준 자동) · `search_nearby_places`, `find_station` |
 | D | 김주은 | TMAP 경로 + 판정 | 보행 경로 왕복 · `get_walking_routes`, `select_feasible_plans` |
 | E | 장인우 | 승인·기억·미들웨어 | HITL 재개·Store·미들웨어 · `confirm_plan`, `save/delete_preferences`, 발표 슬라이드 |
 | F | 김선주 | 문서·품질·발표 | 설계서 최종본·README·데모 문안·발표 취합·테스트 실행·제출 zip |
@@ -126,7 +126,7 @@ voltgo/
 │   │   └── tmap_routes.py    #   TMAP 보행자 경로, 가는 길·오는 길 각각 조회 (+ Mock)
 │   ├── core/                 # 결정적 계산 (순수 함수, API/LLM 모름)
 │   │   ├── time_budget.py    #   잔여시간 → 충전 완료 시각 → 복귀 마감 → 가용시간(초)
-│   │   ├── place_policy.py   #   카테고리 매핑, 체류 기본값, 500m 필터, 중복 제거
+│   │   ├── place_policy.py   #   카테고리 매핑, 체류 기본값, 반경 필터(500~1000m 자동), 중복 제거
 │   │   └── feasibility.py    #   왕복+체류 ≤ 가용시간 판정, 정렬, 선택 뒤 재검증
 │   └── agent/                # LangChain 에이전트
 │       ├── schemas.py        #   Pydantic 데이터 계약 (ToolResult, ModelDecision, VoltGoResponse …)
@@ -213,7 +213,8 @@ python scripts/probe_tmap_places.py "역삼역 전기차충전소"   # 호출 5�
 | 확인 항목 (2026-09-10, 역삼역 기준) | 결과 |
 | --- | --- |
 | 인증 | `appKey` 헤더. 키가 잘못되면 `403 INVALID_API_KEY` → 키 값·TMAP 상품 사용 신청 확인 |
-| 주변검색 `radius` | km 정수 → `radius=1` 로 받고 코드에서 500m 필터. 카테고리마다 500m 안에 5곳 이상 확보 |
+| 주변검색 `radius` | km 정수 → `radius=1` 로 받고 코드에서 직선거리 필터. 카테고리마다 500m 안에 5곳 이상 확보 |
+| 반경 자동 조정 | `(가용 − 체류) ÷ 2 × 70m/분 ÷ 1.3` → 500~1000m. 시간이 넉넉할 때만 넓히고 줄이지는 않음 (체류 기본값으로 후보를 빼지 않기 위해) |
 | 식사 카테고리 | `meal=음식` 으로 식당 검색 확인 |
 | 업종 필드 | 주변검색 응답에는 없음 (통합검색에만 있음) → `raw_category` 는 보통 빈 값 |
 | 주차장 복제 항목 | 같은 id 로 `OO 주차장` 이 섞여 옴 → 본 장소만 남기고 제외 |
@@ -247,8 +248,9 @@ print(res.status, res.message)
 - [x] `core/` 시간 계산 로직 구현 + 테스트
 - [x] `clients/` API 클라이언트 구현 + Mock 테스트
 - [x] TMAP 장소 실호출 확인·반영 (주차장 중복 제거, 충전소 후보 선택) — C
-- [ ] TMAP 보행 경로 실호출 반영 (`tmap_base` 공용 클라이언트 전환) — D
-- [ ] 현대차 충전 상태 실호출 — B
+- [x] TMAP 보행 경로 반영 (`tmap_base` 공용 클라이언트 전환, 부분 실패 처리) — D
+- [x] 현대차 목표 SoC 불일치 처리·필드 보완 — B (실계정 호출은 확인 중)
+- [x] 남은 시간 기준 검색 반경 자동 조정 — C
 - [x] `agent/` LLM 에이전트 연결 (도구·구조화 출력·HITL·미들웨어)
 - [ ] 시연 시나리오 구성
 

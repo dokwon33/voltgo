@@ -18,7 +18,7 @@ from voltgo.agent.schemas import (
 from voltgo.clients import ClientError
 from voltgo.core import feasibility
 from voltgo.core.place_policy import (
-    DEFAULT_DIST_M, DWELL_DEFAULT_MIN, MAX_DIST_M, MAX_ROUTE_CANDIDATES, filter_places,
+    DWELL_DEFAULT_MIN, MAX_DIST_M, MAX_ROUTE_CANDIDATES, auto_max_dist_m, dwell_sec_for, filter_places,
 )
 from voltgo.core import time_budget
 from voltgo.core.time_budget import STALE_AFTER_SEC
@@ -216,17 +216,20 @@ def find_station(runtime: ToolRuntime, keyword: str, station_id: Optional[str] =
 
 
 @tool
-def search_nearby_places(runtime: ToolRuntime, category: Category,
-                         radius_km: int = 1, max_dist_m: int = DEFAULT_DIST_M) -> dict:
+def search_nearby_places(runtime: ToolRuntime, category: Category, radius_km: int = 1,
+                         max_dist_m: Optional[int] = None, dwell_min: Optional[int] = None) -> dict:
     """충전소 주변에서 사용자가 원하는 종류의 장소를 찾습니다. calculate_time_budget 이 성공한 뒤 호출합니다.
+    검색 반경은 남은 시간과 체류 시간으로 자동으로 정합니다 (최소 500m, 최대 1000m).
 
     Args:
         category: meal(식사) / cafe / convenience(편의점) / mart
         radius_km: TMAP 검색 반경(km, 정수). 기본 1
-        max_dist_m: 직선거리 필터(m). 기본 500. 결과가 없을 때만 1회 최대 1000 까지 늘려서 재검색
+        max_dist_m: 직선거리 필터(m). 비워 두면 자동. 결과가 없을 때만 1회 최대 1000 까지 늘려서 재검색
+        dwell_min: 사용자가 말한 체류 시간(분). 말하지 않았으면 비워 둡니다. select_feasible_plans 에도 같은 값을 넣습니다
     """
     ctx = runtime.context
     s = ctx.session
+    now = ctx.clock()
 
     if s.time_budget is None:
         return tool_error("PRECONDITION_FAILED", "calculate_time_budget 를 먼저 호출하세요")
@@ -236,8 +239,20 @@ def search_nearby_places(runtime: ToolRuntime, category: Category,
         return tool_error("AUTH_ERROR", "장소 API 설정이 없습니다")
     if not (1 <= radius_km <= 3):
         return tool_error("NEED_INPUT", "radius_km 는 1~3 사이")
-    if not (1 <= max_dist_m <= MAX_DIST_M):
+    if max_dist_m is not None and not (1 <= max_dist_m <= MAX_DIST_M):
         return tool_error("NEED_INPUT", f"max_dist_m 는 1~{MAX_DIST_M} 사이")
+    if dwell_min is not None and dwell_min <= 0:
+        return tool_error("NEED_INPUT", "체류 시간은 1분 이상")
+
+    # 반경은 '지금' 남은 시간 기준 (select_feasible_plans 와 같은 기준)
+    available_sec = max(int((s.time_budget.return_deadline - now).total_seconds()), 0)
+    dwell_sec = dwell_sec_for(category, dwell_min)
+    if max_dist_m is None:
+        # 체류 기본값으로 검색을 막거나 반경을 줄이지 않는다. 사용자가 나중에 체류를 짧게 말할 수 있다.
+        max_dist_m = auto_max_dist_m(available_sec, dwell_sec)
+        basis = f"가용 {available_sec // 60}분·체류 {dwell_sec // 60}분 기준 자동"
+    else:
+        basis = "지정값"
 
     try:
         places = ctx.places_client.search_around(s.origin, category, radius_km=radius_km)
@@ -257,10 +272,12 @@ def search_nearby_places(runtime: ToolRuntime, category: Category,
         s.warnings.append("장소 정보는 Mock 데이터입니다")
 
     if not picked:
-        return ToolResult(status="ok", data=[], message="정상 빈 결과. 반경을 한 번만 늘리거나 다른 카테고리를 제안하세요.").dump()
+        return ToolResult(status="ok", data=[],
+                          message=f"직선거리 {max_dist_m}m({basis}) 안에 없음. 정상 빈 결과. "
+                                  "반경을 한 번만 늘리거나 다른 카테고리를 제안하세요.").dump()
 
     return ToolResult(status="ok", data=picked, source=picked[0].poi_source,
-                      message=f"{len(picked)}곳 (직선거리 {max_dist_m}m 이내, 가까운 순)").dump()
+                      message=f"{len(picked)}곳 (직선거리 {max_dist_m}m 이내 - {basis}, 가까운 순)").dump()
 
 
 # ---------------------------------------------------------------
