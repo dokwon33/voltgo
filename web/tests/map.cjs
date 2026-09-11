@@ -4,11 +4,15 @@ const assert = require('node:assert/strict');
 const root = require('node:path').resolve(__dirname, '..');
 const sdk = `(() => { window.drawn=[]; window.mapCount=0;
 class LatLng { constructor(lat,lon){this.lat=lat;this.lon=lon;} }
-class Map { constructor(id,options){window.mapCount++;this.options=options;} resize(w,h){if(!w||!h)throw Error('resize dimensions required');} fitBounds(b,m){window.bounds=b.points;} setCenter(){} setZoom(){} }
+class Map { constructor(id,options){window.mapCount++;this.options=options;} resize(w,h){if(typeof w!=='number'||typeof h!=='number'||!w||!h)throw Error('resize needs pixel numbers');} fitBounds(b,m){window.bounds=b.points;} setCenter(){} setZoom(){} }
 class Overlay { constructor(options){this.options=options;this.map=options.map;window.drawn.push(this);} setMap(m){this.map=m;} addListener(event,cb){this.click=cb;} }
 class Marker extends Overlay {} class Polyline extends Overlay {}
 class LatLngBounds { constructor(){this.points=[];} extend(p){this.points.push(p);} }
 window.Tmapv2={Map,LatLng,Marker,Polyline,LatLngBounds,Size:class{}}; })();`;
+// Real TMAP jsv2 loader shape: a stub Tmapv2 plus document.write of the SDK body from another host.
+const loader = `window.Tmapv2={_getScriptLocation(){return 'https://topopentile1.tmap.co.kr/scriptSDKV2/';},VERSION_NUMBER:1};document.write("<script src='https://topopentile1.tmap.co.kr/scriptSDKV2/tmapjs2.min.js?version=1'></script>");`;
+// The real body reads appKey from the loader <script> src.
+const sdkBody = `window.sdkAppKey=[...document.getElementsByTagName('script')].map(s=>s.src.split('appKey=')[1]).find(Boolean)||'';` + sdk;
 const c = (id,name) => ({plan_id:id, poi_id:id, name, category:'cafe', outbound_sec:240,inbound_sec:300,dwell_sec:600,slack_sec:100,return_at:'2026-09-11T14:20:00+09:00',leave_by:'2026-09-11T14:15:00+09:00',poi_source:'tmap',route_source:'tmap',opening_status:'unknown'});
 const line = coords => ({type:'LineString',coordinates:coords});
 const geometry = {
@@ -24,10 +28,11 @@ const page=await browser.newPage({viewport:{width:390,height:844}});
 page.setDefaultTimeout(15000);
 const errors=[]; page.on('pageerror',e=>errors.push(e.message));
 let payload={response:{status:'ok',message:'추천 장소입니다.',candidates:[c('A','추천 카페 A'),c('B','추천 카페 B')]},session:{},map_data:geometry};
-let threadCount=0, sdkRequests=0, failSDK=false, delaySDK=0, key='test-browser-key', apiCalls=0, failTiles=true;
+let threadCount=0, sdkRequests=0, failSDK=false, delaySDK=0, realLoader=false, key='test-browser-key', apiCalls=0, failTiles=true;
 await page.route('**/*',async route=>{
  const url=new URL(route.request().url());
- if(url.hostname==='apis.openapi.sk.com'){sdkRequests++; if(delaySDK)await new Promise(r=>setTimeout(r,delaySDK));return failSDK?route.abort():route.fulfill({contentType:'application/javascript',body:sdk});}
+ if(url.hostname==='apis.openapi.sk.com'){sdkRequests++; if(delaySDK)await new Promise(r=>setTimeout(r,delaySDK));return failSDK?route.abort():route.fulfill({contentType:'application/javascript',body:realLoader?loader:sdk});}
+ if(url.hostname==='topopentile1.tmap.co.kr') return route.fulfill({contentType:'application/javascript',body:sdkBody});
  if(url.hostname==='tile.openstreetmap.org') return failTiles ? route.abort() : route.fulfill({contentType:'image/png',body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=','base64')});
  if(url.hostname!=='voltgo.test')return route.abort();
  if(url.pathname.startsWith('/api/')){apiCalls++;return route.fulfill({json:url.pathname==='/api/session'?{session:{},thread_id:'map-'+(++threadCount)}:url.pathname==='/api/health'?{}:payload});}
@@ -136,7 +141,13 @@ await page.setViewportSize({width:320,height:844});
 await page.evaluate(()=>showChat());
 assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
 await page.screenshot({path:'/tmp/voltgo-abc-recommendations.png',fullPage:true});
+// The real loader is inserted after page load, so its document.write must be bridged to a <script>.
+key='test-browser-key'; delaySDK=0; realLoader=true;
+await page.reload();await submit();
+await page.waitForFunction(()=>window.drawn?.filter(x=>x.map).length>0);
+assert.equal(await page.evaluate(()=>window.sdkAppKey),'test-browser-key');
+assert.equal(await page.evaluate(()=>document.write===Document.prototype.write),true,'document.write restored');
 assert.deepEqual(errors,[]);
-console.log('PASS: markers, coordinate order, route toggles, card/marker selection, no extra API calls, snapshots, missing/invalid data, mobile layout, single map, reset, SDK failure/retry, async reset, keyless Leaflet overview/markers, tile error/retry.');
+console.log('PASS: real jsv2 loader (document.write bridge),  markers, coordinate order, route toggles, card/marker selection, no extra API calls, snapshots, missing/invalid data, mobile layout, single map, reset, SDK failure/retry, async reset, keyless Leaflet overview/markers, tile error/retry.');
 } finally {await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});
