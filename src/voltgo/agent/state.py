@@ -33,8 +33,9 @@ class Session:
     candidates: dict[str, CandidatePlan] = field(default_factory=dict)  # plan_id -> CandidatePlan
     selected_ran: bool = False          # select_feasible_plans 를 한 번이라도 돌렸는지
 
+    # 마지막 계산에 사용한 차량 목표. 공급자 갱신에 따른 조건 변경 감지용이며 사용자 입력이 아니다.
+    target_soc_pct: Optional[float] = None
     # 사용자 조건
-    target_soc_pct: float = 80
     user_limit_min: Optional[int] = None
     limit_said_at: Optional[datetime] = None
     dwell_overrides: dict[str, int] = field(default_factory=dict)

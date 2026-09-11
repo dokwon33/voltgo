@@ -63,6 +63,7 @@ const root = path.resolve(__dirname, '..');
     assert.equal(await page.locator('[data-confirmed-plan="A"] [data-change-destination]').isVisible(), false);
     await done.locator('.destination-map').click();
     assert.equal(await page.locator('.map-place').innerText(), 'B · ' + b.name);
+    await page.locator('.map-back').click();
     await page.locator('[data-confirmed-plan="A"] .map-open').click();
     await page.locator('#mapBtn').click();
     assert.equal(await page.locator('.map-place').innerText(), 'B · ' + b.name, 'header map must prefer the confirmed destination');

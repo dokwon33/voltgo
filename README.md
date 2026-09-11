@@ -219,7 +219,7 @@ python scripts/web.py --fixed    # 14:00 고정 시계 (설계서 C001 조건)
 | API | 내용 |
 | --- | --- |
 | `GET /api/health` | 충전·TMAP 모드, 시계, 모델, user_id, 서버 instance_id |
-| `GET /api/session?thread_id=` | 차량·계산 목표·조건·현재 후보·선호·대기 승인·map_data |
+| `GET /api/session?thread_id=` | 차량·차량 목표·조건·현재 후보·선호·대기 승인·map_data |
 | `GET /api/session?existing=1&thread_id=` | 이미 존재하는 대화인지 조회. 없는 thread를 만들지 않음 |
 | `POST /api/ask` | `{thread_id, instance_id, text, selection?}`. 선택한 후보 ID·버전·생성시각 검증 |
 | `POST /api/decide` | `{thread_id, instance_id, decision, request_id}`. approve/reject 재전송 중복 방지 |

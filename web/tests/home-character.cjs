@@ -56,6 +56,7 @@ const root = path.resolve(__dirname, '..');
     assert.equal(await page.locator('#homeVolty').getAttribute('data-activity'), 'hello');
     await page.evaluate(() => { window.sharedHomeShadow = document.querySelector('.volty-ground-shadow'); });
     assert.equal(await page.locator('.volty-ground-shadow').count(), 1);
+    await page.screenshot({path: '/tmp/voltgo-home-hello-smooth.png', fullPage: true});
     const captions = new Set();
     for (const [category, text, line] of [
       ['meal', '간단히 밥 먹고 오고 싶어', '든든하게 한 끼'],

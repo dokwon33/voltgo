@@ -97,7 +97,7 @@
   height: 100%;
   background-size: 400% 400%;
   background-repeat: no-repeat;
-  background-position: 0 0;
+  background-position: var(--pose-0, 0% 0%);
 }
 .volty-activity-sprite { position: relative; }
 .volty-activity-sprite::after {
@@ -105,6 +105,7 @@
   position: absolute;
   inset: 0;
   background-image: inherit;
+  background-size: inherit;
   opacity: 0;
 }
 .greet .volty-activity-sprite {
@@ -119,47 +120,87 @@
 [data-activity="convenience"] .volty-activity { animation: none; }
 #homeVolty[data-activity="mart"] { --activity-duration: 3.2s; }
 [data-activity="mart"] .volty-activity { animation-name: volty-cart-push; }
+/* Generated atlases have small gutter offsets. Register source windows so
+   a new row never moves the entire character or the storefront. */
+[data-activity="meal"] .volty-activity-sprite {
+  background-size: 411.147541% 411.147541%;
+  --pose-0: 2.212856% 1.369863%;
+  --pose-1: 34.457323% 1.369863%;
+  --pose-2: 66.701791% 1.369863%;
+  --pose-3: 98.946259% 1.369863%;
+  --pose-4: 2.212856% 33.508957%;
+  --pose-5: 34.457323% 33.508957%;
+  --pose-6: 66.701791% 33.508957%;
+  --pose-7: 98.946259% 33.508957%;
+  --pose-8: 2.212856% 65.648051%;
+  --pose-9: 34.457323% 65.648051%;
+  --pose-10: 66.701791% 65.648051%;
+  --pose-11: 98.946259% 65.648051%;
+  --pose-12: 2.212856% 97.787144%;
+  --pose-13: 34.457323% 97.787144%;
+  --pose-14: 66.701791% 97.787144%;
+  --pose-15: 98.946259% 97.787144%;
+}
+[data-activity="convenience"] .volty-activity-sprite {
+  background-size: 418.000000% 418.000000%;
+  --pose-0: 2.725367% 3.878407%;
+  --pose-1: 35.220126% 3.878407%;
+  --pose-2: 67.505241% 3.878407%;
+  --pose-3: 99.371069% 3.878407%;
+  --pose-4: 2.725367% 33.962264%;
+  --pose-5: 35.220126% 33.962264%;
+  --pose-6: 67.505241% 33.962264%;
+  --pose-7: 99.371069% 33.962264%;
+  --pose-8: 2.725367% 64.570231%;
+  --pose-9: 35.220126% 64.570231%;
+  --pose-10: 67.505241% 64.570231%;
+  --pose-11: 99.371069% 64.570231%;
+  --pose-12: 2.725367% 94.968553%;
+  --pose-13: 35.220126% 94.968553%;
+  --pose-14: 67.505241% 94.968553%;
+  --pose-15: 99.371069% 94.968553%;
+}
 @keyframes volty-frame-blend {
   from { opacity: 0; }
   to { opacity: 1; }
 }
 @keyframes volty-activity-frames {
-  0% { background-position: 0.000000% 0.000000%; }
-  6.25% { background-position: 33.333333% 0.000000%; }
-  12.5% { background-position: 66.666667% 0.000000%; }
-  18.75% { background-position: 100.000000% 0.000000%; }
-  25% { background-position: 0.000000% 33.333333%; }
-  31.25% { background-position: 33.333333% 33.333333%; }
-  37.5% { background-position: 66.666667% 33.333333%; }
-  43.75% { background-position: 100.000000% 33.333333%; }
-  50% { background-position: 0.000000% 66.666667%; }
-  56.25% { background-position: 33.333333% 66.666667%; }
-  62.5% { background-position: 66.666667% 66.666667%; }
-  68.75% { background-position: 100.000000% 66.666667%; }
-  75% { background-position: 0.000000% 100.000000%; }
-  81.25% { background-position: 33.333333% 100.000000%; }
-  87.5% { background-position: 66.666667% 100.000000%; }
-  93.75% { background-position: 100.000000% 100.000000%; }
-  100% { background-position: 0.000000% 0.000000%; }
+  0% { background-position: var(--pose-0, 0.000000% 0.000000%); }
+  6.25% { background-position: var(--pose-1, 33.333333% 0.000000%); }
+  12.5% { background-position: var(--pose-2, 66.666667% 0.000000%); }
+  18.75% { background-position: var(--pose-3, 100.000000% 0.000000%); }
+  25% { background-position: var(--pose-4, 0.000000% 33.333333%); }
+  31.25% { background-position: var(--pose-5, 33.333333% 33.333333%); }
+  37.5% { background-position: var(--pose-6, 66.666667% 33.333333%); }
+  43.75% { background-position: var(--pose-7, 100.000000% 33.333333%); }
+  50% { background-position: var(--pose-8, 0.000000% 66.666667%); }
+  56.25% { background-position: var(--pose-9, 33.333333% 66.666667%); }
+  62.5% { background-position: var(--pose-10, 66.666667% 66.666667%); }
+  68.75% { background-position: var(--pose-11, 100.000000% 66.666667%); }
+  75% { background-position: var(--pose-12, 0.000000% 100.000000%); }
+  81.25% { background-position: var(--pose-13, 33.333333% 100.000000%); }
+  87.5% { background-position: var(--pose-14, 66.666667% 100.000000%); }
+  93.75% { background-position: var(--pose-15, 100.000000% 100.000000%); }
+  100% { background-position: var(--pose-0, 0.000000% 0.000000%); }
 }
 @keyframes volty-activity-next {
-  0% { background-position: 33.333333% 0.000000%; }
-  6.25% { background-position: 66.666667% 0.000000%; }
-  12.5% { background-position: 100.000000% 0.000000%; }
-  18.75% { background-position: 0.000000% 33.333333%; }
-  25% { background-position: 33.333333% 33.333333%; }
-  31.25% { background-position: 66.666667% 33.333333%; }
-  37.5% { background-position: 100.000000% 33.333333%; }
-  43.75% { background-position: 0.000000% 66.666667%; }
-  50% { background-position: 33.333333% 66.666667%; }
-  56.25% { background-position: 66.666667% 66.666667%; }
-  62.5% { background-position: 100.000000% 66.666667%; }
-  68.75% { background-position: 0.000000% 100.000000%; }
-  75% { background-position: 33.333333% 100.000000%; }
-  81.25% { background-position: 66.666667% 100.000000%; }
-  87.5% { background-position: 100.000000% 100.000000%; }
-  93.75% { background-position: 0.000000% 0.000000%; }
-  100% { background-position: 33.333333% 0.000000%; }
+  0% { background-position: var(--pose-1, 33.333333% 0.000000%); }
+  6.25% { background-position: var(--pose-2, 66.666667% 0.000000%); }
+  12.5% { background-position: var(--pose-3, 100.000000% 0.000000%); }
+  18.75% { background-position: var(--pose-4, 0.000000% 33.333333%); }
+  25% { background-position: var(--pose-5, 33.333333% 33.333333%); }
+  31.25% { background-position: var(--pose-6, 66.666667% 33.333333%); }
+  37.5% { background-position: var(--pose-7, 100.000000% 33.333333%); }
+  43.75% { background-position: var(--pose-8, 0.000000% 66.666667%); }
+  50% { background-position: var(--pose-9, 33.333333% 66.666667%); }
+  56.25% { background-position: var(--pose-10, 66.666667% 66.666667%); }
+  62.5% { background-position: var(--pose-11, 100.000000% 66.666667%); }
+  68.75% { background-position: var(--pose-12, 0.000000% 100.000000%); }
+  75% { background-position: var(--pose-13, 33.333333% 100.000000%); }
+  81.25% { background-position: var(--pose-14, 66.666667% 100.000000%); }
+  87.5% { background-position: var(--pose-15, 100.000000% 100.000000%); }
+  93.75% { background-position: var(--pose-0, 0.000000% 0.000000%); }
+  100% { background-position: var(--pose-1, 33.333333% 0.000000%); }
 }
 @keyframes volty-activity-float {
   0%, 100% { transform: translate(-1px, 1px) rotate(-1.8deg) scale(1); }

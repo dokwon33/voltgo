@@ -1,5 +1,6 @@
 // UI state lives in this browser; agent checkpoints remain on the running server.
 let timeline = [], conversations = [], replaying = false, archived = false;
+let currentMapData = {};
 let serverInstance = '', pendingApproval = null, receivedAt = Date.now(), noticeTimer;
 const HISTORY_LIMIT = 20;
 function storageKey() { return 'voltgo.conversations.v1.' + (health.user_id || 'local'); }
@@ -29,9 +30,11 @@ function serverNow() {
   return Number.isFinite(base) ? base + (health.clock === 'fixed' ? 0 : Date.now() - receivedAt) : Date.now();
 }
 function acceptEnvelope(data) {
+  currentMapData = data.map_data || {};
   session = data.session || {}; serverInstance = data.instance_id || serverInstance;
   if (data.instance_id) health.instance_id = data.instance_id;
   pendingApproval = data.pending_approval || null; receivedAt = Date.now();
+  if (history.state?.view === 'map' && !routeMap.selected) routeMap.overview(currentMapData);
   syncFeatures();
 }
 function approvalExpired() {
@@ -85,9 +88,14 @@ function updatePlanButtons() {
     button.disabled = !destination || !freshDestinationOption(button.dataset.destinationPlan) || busy || Boolean(pendingApproval);
   });
 }
+function vehicleTarget(s) {
+  const c = s.charging ?? s.display_charging;
+  const target = c?.reported_target_soc_pct ?? c?.target_soc_pct;
+  return typeof target === 'number' && Number.isFinite(target) && target > 0 && target <= 100 ? target : null;
+}
 function syncFeatures() {
   if (!$('#conditionSummary')) return;
-  const target = session.effective_target_soc_pct ?? session.display_charging?.target_soc_pct ?? session.charging?.target_soc_pct;
+  const target = vehicleTarget(session);
   const parts = [session.origin, target ? `목표 ${target}%` : '', session.user_limit_min ? `시간 제한 ${session.user_limit_min}분` : ''].filter(Boolean);
   $('#conditionSummary').textContent = parts.join(' · '); $('#conditionSummary').hidden = !parts.length;
   $('#archiveNote').hidden = !archived;
@@ -106,8 +114,8 @@ function renderVehicleMeta(s) {
   const c = s.charging, b = s.home_budget;
   const rows = [['측정 시각', formatTime(c?.observed_at)], ['마지막 조회', formatTime(c?.fetched_at || c?.observed_at)],
     ['시간 계산', b?.estimate_basis === 'energy_power' ? '배터리 용량·평균 전력으로 추정' : b?.estimate_basis === 'reported_remaining' ? '전달받은 남은 시간 기준' : '계산 정보 미확인']];
-  if (c?.reported_target_soc_pct != null) rows.push(['차량 설정 목표', c.reported_target_soc_pct + '%']);
-  if (s.requested_target_soc_pct != null) rows.push(['요청 / 계산 목표', `${s.requested_target_soc_pct}% / ${s.effective_target_soc_pct ?? '—'}%`]);
+  const target = vehicleTarget(s);
+  rows.push(['차량 설정 목표', target !== null ? target + '%' : '조회 필요']);
   $('#vehicleMeta').innerHTML = rows.map(([k,v]) => `<div><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('');
 }
 const categoryOptions = (value = '') => '<option value="">지금 조건 유지</option>' + Object.entries({meal:'식사', cafe:'카페', convenience:'편의점', mart:'마트'}).map(([v,l]) => `<option value="${v}" ${v === value ? 'selected' : ''}>${l}</option>`).join('');
@@ -135,7 +143,8 @@ function openFeature(mode, record = true) {
     }
   } else if (mode === 'conditions') {
     $('#featureTitle').textContent = '이번 외출 조건';
-    $('#featureBody').innerHTML = `<p class="feature-description">바꿀 항목만 입력하면 다시 추천해요.</p><form id="conditionForm" class="feature-form"><label>하고 싶은 일<select name="category">${categoryOptions()}</select></label><div class="field-pair"><label>목표 충전량 (%)<input name="target" inputmode="decimal" type="number" min="1" max="100" step="0.1" placeholder="${esc(session.effective_target_soc_pct ?? '예: 80')}"></label><label>시간 제한 (분)<input name="limit" inputmode="numeric" type="number" min="1" max="1440" placeholder="${esc(session.user_limit_min ?? '예: 30')}"></label></div><label>장소에서 머무는 시간 (분)<input name="dwell" inputmode="numeric" type="number" min="5" max="60" placeholder="예: 15"></label><label>출발 충전소<input name="station" maxlength="100" placeholder="${esc(session.origin || '충전소 이름')}"></label><p class="feature-description">목표 충전량은 외출 시간 계산 기준이에요. 차량의 충전 설정은 바꾸지 않아요.</p><button class="feature-primary" type="submit">이 조건으로 다시 추천</button></form>`;
+    const target = vehicleTarget(session);
+    $('#featureBody').innerHTML = `<p class="feature-description">바꿀 항목만 입력하면 다시 추천해요.</p><form id="conditionForm" class="feature-form"><label>하고 싶은 일<select name="category">${categoryOptions()}</select></label><div class="field-pair"><label>차량 목표 (변경 불가)<input id="vehicleTarget" value="${esc(target !== null ? target + '%' : '조회 필요')}" readonly></label><label>시간 제한 (분)<input name="limit" inputmode="numeric" type="number" min="1" max="1440" placeholder="${esc(session.user_limit_min ?? '예: 30')}"></label></div><label>장소에서 머무는 시간 (분)<input name="dwell" inputmode="numeric" type="number" min="5" max="60" placeholder="예: 15"></label><label>출발 충전소<input name="station" maxlength="100" placeholder="${esc(session.origin || '충전소 이름')}"></label><p class="feature-description">목표 충전량은 차량에서 조회한 값이에요. 차량이나 차량 앱에서 변경한 뒤 차량 정보를 새로고침해 주세요.</p><button class="feature-primary" type="submit">이 조건으로 다시 추천</button></form>`;
   } else if (mode === 'preferences') {
     $('#featureTitle').textContent = '볼티가 기억하는 취향';
     const p = session.preferences;
@@ -159,6 +168,7 @@ async function restoreConversation(id) {
   catch { notifyUser('서버에 연결하지 못해 보관된 내용만 보여드려요.'); }
   threadId = id; archived = !live?.exists || live.instance_id !== record.instance_id;
   timeline = record.turns; session = record.session || {}; lastRes = record.response;
+  currentMapData = {};
   serverInstance = record.instance_id; pendingApproval = null; receivedAt = Date.now();
   if (!archived) acceptEnvelope(live);
   routeMap.reset(); $('#messages').innerHTML = ''; $('#approval').hidden = true;
@@ -222,7 +232,7 @@ function initFeatures() {
       if (!category && !dwell) { notifyUser('좋아하는 활동이나 머무는 시간을 입력해 주세요.'); return; }
       await closeFeature(); send([category ? `${CAT[category]}를 선호해` : '', dwell ? `평소 체류시간은 ${dwell}분이야` : '', '이 취향을 기억해줘'].filter(Boolean).join('. '));
     } else if (e.target.id === 'conditionForm') {
-      const parts = [category ? `${CAT[category]}에 가고 싶어` : '', f.get('target') ? `목표 충전량은 ${f.get('target')}%` : '', f.get('limit') ? `시간 제한은 지금부터 ${f.get('limit')}분` : '', dwell ? `체류시간은 ${dwell}분` : '', f.get('station')?.trim() ? `출발 충전소는 ${f.get('station').trim()}` : '', '나머지 조건은 유지하고 현재 시각으로 다시 추천해줘'];
+      const parts = [category ? `${CAT[category]}에 가고 싶어` : '', f.get('limit') ? `시간 제한은 지금부터 ${f.get('limit')}분` : '', dwell ? `체류시간은 ${dwell}분` : '', f.get('station')?.trim() ? `출발 충전소는 ${f.get('station').trim()}` : '', '나머지 조건은 유지하고 현재 시각으로 다시 추천해줘'];
       await closeFeature(); send(parts.filter(Boolean).join('. '));
     }
   });

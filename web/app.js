@@ -2,6 +2,7 @@
                 coffee: 'img/volty_coffee.png', clock: 'img/volty_clock.png' };
   // 상태별 볼티 표정과 한 줄 (설계서 2.4 VoltGoResponse.status)
   const MOOD = {
+    idle: ['hello', '어디에 다녀오고 싶으세요?'],
     busy: ['think', '충전 상태랑 근처 장소, 왕복 시간을 보고 있어요…'],
     ok: ['point', '지금 다녀올 수 있는 곳이에요. 출발 마감만 지켜 주세요!'],
     need_input: ['think', '조금만 더 알려주시면 바로 계산해 볼게요.'],
@@ -12,9 +13,6 @@
   };
   const CAT = { meal: '식사', cafe: '카페', convenience: '편의점', mart: '마트' };
   const PLUG = { fast: '급속', slow: '완속', none: '미연결' };
-  const FIELD = { charging: '충전 정보', remaining_min: '남은 충전 시간', origin: '출발 충전소', intent: '하고 싶은 일' };
-  const SHORT = { '잔여시간은 배터리 용량·평균 전력 정책값으로 추정한 값입니다': '잔여시간 추정' };
-  const isDisplayNotice = (text) => !/mock|영업.*(?:미확인|확인되지|확인할 수 없)/i.test(text);
 
   const $ = (s) => document.querySelector(s);
   const routeMap = new VoltGoRouteMap($('#routeMap'));
@@ -36,14 +34,14 @@
   // ---------- 홈 카드 ----------
   function renderCar(s) {
     homeCharacter.render(s, lastRes);
-    const c = s.display_charging ?? s.charging, b = s.home_budget;
+    const c = s.charging ?? s.display_charging, b = s.home_budget;
     const soc = typeof c?.soc_pct === 'number' && Number.isFinite(c.soc_pct) && c.soc_pct >= 0 && c.soc_pct <= 100 ? c.soc_pct : null;
     const label = soc === null ? '—' : Number(soc.toFixed(1)) + '%';
     // 화면 표시용 잔량 구간. 실제 추천/충전 판단 정책과는 별개다.
     const level = soc === null ? 'unknown' : soc <= 20 ? 'low' : soc <= 40 ? 'medium' : 'normal';
     const charging = c?.charging === true ? 'active' : c?.charging === false ? 'idle' : 'unknown';
     const status = { active: '충전 중', idle: '충전 안 함', unknown: '상태 미확인' }[charging];
-    const targetPct = typeof c?.target_soc_pct === 'number' && c.target_soc_pct > 0 && c.target_soc_pct <= 100 ? c.target_soc_pct : null;
+    const targetPct = vehicleTarget(s);
     $('#batteryTarget').hidden = targetPct === null;
     $('#batteryTarget').style.left = targetPct + '%';
     $('#batteryTarget').title = `목표 ${targetPct}%`;
@@ -62,7 +60,7 @@
         $('#batteryRemaining').textContent = `${targetPct}% 목표에 도달했어요`;
       } else {
         const duration = remaining === null ? '시간 확인 중' : remaining <= 0 ? '곧 도달' : remaining < 60 ? '1분 미만' : `약 ${Math.ceil(remaining / 60)}분`;
-        $('#batteryRemaining').textContent = targetPct === null ? '목표 충전량을 알려 주세요' : `${targetPct}%까지 ${duration}`;
+        $('#batteryRemaining').textContent = targetPct === null ? '차량의 목표 충전량을 확인해 주세요' : `${targetPct}%까지 ${duration}`;
         if (targetPct !== null && estimatedFinish !== null && (remaining === null || remaining > 0)) {
           const time = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(estimatedFinish);
           $('#batteryFinish').textContent = `${time} 예정`;
@@ -96,7 +94,7 @@
       $('#carSub').textContent = '대화를 시작하면 다시 확인해요';
       return;
     }
-    const target = typeof c.target_soc_pct === 'number' && c.target_soc_pct > 0 && c.target_soc_pct <= 100 ? `목표 ${c.target_soc_pct}%까지 ` : '';
+    const target = targetPct !== null ? `목표 ${targetPct}%까지 ` : '';
     if (charging === 'idle') $('#carMain').textContent = '지금은 충전 중이 아니에요';
     else if (charging === 'unknown') $('#carMain').textContent = '충전 상태를 아직 확인하지 못했어요';
     else $('#carMain').textContent = $('#batteryRemaining').textContent || target + '충전 중';
@@ -165,21 +163,17 @@
     const cands = res.candidates || [];
     const mapKeys = routeMap.register(res, mapData);
     const mood = MOOD[res.status] ? res.status : 'busy';
-    // 후보 줄("1) ...")은 카드로, 경고 줄("※")은 작은 글씨로, 시간 요약 줄은 위 띠로 옮긴다
+    // 후보는 카드로, 시간 요약은 위 띠로 표시한다. 보조 입력 안내와 주석은 대화에서 생략한다.
     const lines = (res.message || '').split('\n').filter((l) => l.trim() && !(cands.length && /^\d+\)\s/.test(l))
-      && !l.startsWith('※') && !l.startsWith('충전 완료 예정'));
-    const warns = (res.warnings || []).filter(isDisplayNotice).map((w) => SHORT[w] || w);
+      && !/^(?:※|알려주시면 좋은 것:|충전 완료 예정)/.test(l.trim()));
     const confirmed = res.status === 'confirmed' && cands[0];
     const html = `
       <div class="row bot">
         <img class="mini" src="${IMG[MOOD[mood][0]]}" alt="">
         <div class="col">
           ${lines.length ? `<div class="say">${lines.map((l) => `<p>${esc(l)}</p>`).join('')}</div>` : ''}
-          ${res.status === 'need_input' && (res.missing_fields || []).length
-            ? `<p class="fine">알려주시면 좋은 것: ${res.missing_fields.map((f) => esc(FIELD[f] || f)).join(', ')}</p>` : ''}
           ${confirmed ? `<div class="arrival"><div><span>늦어도 출발</span><b>${hhmm(confirmed.leave_by)}</b></div><div><span>차량 복귀</span><b>${hhmm(confirmed.return_at)}</b></div></div>` : ''}
           ${cands.length ? cands.map((c, i) => planCard(c, res.status, mapKeys[i])).join('') : ''}
-          ${warns.length ? `<p class="fine">※ ${warns.map(esc).join(' · ')}</p>` : ''}
         </div>
       </div>`;
     $('#messages').insertAdjacentHTML('beforeend', html);
@@ -298,7 +292,7 @@
     renderNavigation(state);
   }
   function showChat(record = true) {
-    if (record && backgroundView().view === 'home') { navigateTo('chat'); return; }
+    if (record && backgroundView().view !== 'chat') { navigateTo('chat'); return; }
     $('#home').hidden = true; $('#chat').hidden = false;
     $('#backBtn').hidden = false;
   }
@@ -314,6 +308,8 @@
     $('#info').hidden = state.view !== 'info';
     $('#approval').hidden = state.view !== 'approval';
     const base = overlayViews.has(state.view) ? state.background : state;
+    $('#chat').classList.toggle('is-map', base?.view === 'map');
+    $('#mapBtn').setAttribute('aria-pressed', String(base?.view === 'map'));
     if (base?.view === 'home') {
       if (archived) { goHome(); return; }
       showHome();
@@ -351,9 +347,8 @@
     navigateTo('home');
   }
   function showEmptyMap() {
-    routeMap.hide(); routeMap.panel.hidden = false;
-    $('.map-place').textContent = '근처 추천 장소'; $('.map-note').textContent = '';
-    routeMap.message('먼저 가고 싶은 곳을 알려 주세요. 추천받은 장소를 지도에서 볼 수 있어요.');
+    routeMap.hide();
+    routeMap.overview(currentMapData);
   }
   routeMap.onSelect = () => navigateTo('map', {
     mapKey: routeMap.selected, replace: sameScope(history.state) && history.state.view === 'map',
@@ -381,6 +376,10 @@
   });
   $('#backBtn').addEventListener('click', goBack);
   $('.map-back').addEventListener('click', goBack);
+  $('.map-start').addEventListener('click', () => {
+    navigateTo(timeline.length ? 'chat' : 'home');
+    $('#input').focus();
+  });
   window.addEventListener('popstate', event => {
     if (sameScope(event.state)) renderNavigation(event.state);
     else resetNavigation('home'); // A different conversation's old entries must not restore this thread's map.
@@ -390,6 +389,8 @@
   async function send(text, selection = null) {
     text = (text || '').trim();
     if (!text || busy || archived || pendingApproval || !$('#approval').hidden) return;
+    // 홈에서 시작하는 요청은 새 대화다. 기존 대화는 기록에 보관한다.
+    if (!$('#home').hidden && timeline.length) goHome({loadSession: false});
     showChat(); addMe(text); $('#input').value = '';
     busy = true; setLock(); setMood('busy'); addTyping();
     try {
@@ -416,7 +417,7 @@
     finally { busy = false; setLock(); saveConversation(); }
   }
 
-  function goHome() {
+  function goHome({loadSession = true} = {}) {
     if (busy) return;
     saveConversation(); timeline = []; archived = false; pendingApproval = null; serverInstance = health.instance_id || '';
     $('#archiveNote').hidden = true; $('#stationOptions').hidden = true; $('#conditionSummary').hidden = true;
@@ -424,15 +425,18 @@
     routeMap.reset();
     threadId = 'web-' + crypto.randomUUID();
     session = {}; lastRes = null;
+    currentMapData = {};
+    setMood('idle');
     renderCar(session);
     $('#backBtn').hidden = true;
     $('#messages').innerHTML = ''; $('#follow').innerHTML = ''; $('#strip').hidden = true;
     $('#approval').hidden = true; $('#chat').hidden = true; $('#home').hidden = false;
     busy = false; setLock();
     resetNavigation('home');
+    if (!loadSession) return; // 첫 질문의 응답에서 새 세션 정보를 받는다.
     const requestedThread = threadId;
-    api('/api/session?thread_id=' + encodeURIComponent(threadId)).then((d) => { if (requestedThread !== threadId) return; acceptEnvelope(d); renderCar(session); })
-      .catch(() => { $('#carMain').textContent = '서버가 꺼져 있어요'; $('#carSub').textContent = '터미널에서 python scripts/web.py 를 켜고 새로고침해 주세요'; $('#carTimes').hidden = true; });
+    api('/api/session?thread_id=' + encodeURIComponent(threadId)).then((d) => { if (requestedThread !== threadId || timeline.length) return; acceptEnvelope(d); renderCar(session); })
+      .catch(() => { if (requestedThread !== threadId || timeline.length) return; $('#carMain').textContent = '서버가 꺼져 있어요'; $('#carSub').textContent = '터미널에서 python scripts/web.py 를 켜고 새로고침해 주세요'; $('#carTimes').hidden = true; });
   }
 
   $('#composer').addEventListener('submit', (e) => { e.preventDefault(); send($('#input').value); });

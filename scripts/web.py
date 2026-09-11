@@ -34,7 +34,7 @@ from demo import make_context                       # demo.py 와 같은 Context
 from voltgo.agent import memory
 from voltgo.agent.agent import ask, build_agent, decide
 from voltgo.agent.approval import pending_approvals
-from voltgo.agent.tools import get_charging_status, _apply_target_soc
+from voltgo.agent.tools import get_charging_status
 from voltgo.clients import ClientError
 from voltgo.core.time_budget import calculate_time_budget
 
@@ -102,8 +102,8 @@ def session_summary(context):
     pref = memory.load_preferences(context.user_id)
     dump = lambda m: m.model_dump(mode="json") if m else None
     snap = peek_charging(context)
-    requested = s.target_soc_pct if s.time_budget else None
-    display = _apply_target_soc(snap, requested) if snap and requested is not None else snap
+    # 기존 화면 계약은 유지하되 목표/잔여시간은 차량 조회값으로만 채운다.
+    display = snap.model_copy(update={"target_soc_pct": snap.vehicle_target_soc_pct}) if snap else None
     current_budget = None
     if s.time_budget and display:
         current_budget, _ = calculate_time_budget(
@@ -115,7 +115,6 @@ def session_summary(context):
         "charging": dump(snap),
         "display_charging": dump(display),
         "home_budget": dump(peek_budget(context, display)),
-        "requested_target_soc_pct": requested,
         "effective_target_soc_pct": display.target_soc_pct if display else None,
         "origin": s.origin.name if s.origin else None,
         "station_candidates": [dump(c) for c in s.station_candidates.values()],

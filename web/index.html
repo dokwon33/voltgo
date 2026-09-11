@@ -4,8 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>VoltGo</title>
-<link rel="stylesheet" href="map.css">
-<link rel="stylesheet" href="volty.css">
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+<link rel="stylesheet" href="map.css?v=20260911-map-live">
+<link rel="stylesheet" href="volty.css?v=20260911-smooth16">
 <link rel="preload" href="fonts/gowun-dodum.woff2" as="font" type="font/woff2" crossorigin>
 <style>
   @font-face { font-family: 'Gowun Dodum'; font-style: normal; font-weight: 400; font-display: swap; src: url('fonts/gowun-dodum.woff2') format('woff2'); }
@@ -341,14 +342,16 @@
     <p class="archive-note" id="archiveNote" hidden>보관된 대화예요. 새 대화에서 다시 추천받을 수 있어요.</p>
     <section class="station-options" id="stationOptions" aria-label="출발 충전소 선택" hidden></section>
     <section class="route-map" id="routeMap" aria-labelledby="mapTitle" hidden>
-      <button class="map-back" type="button">← 추천 목록으로</button>
+      <button class="map-back" type="button">← 이전 화면으로</button>
       <div class="map-heading">
         <div><h3 id="mapTitle">걸어서 다녀오는 길</h3><p class="map-place"></p></div>
         <button class="map-fit" type="button" disabled>전체 보기</button>
       </div>
+      <div class="map-places" role="group" aria-label="지도에서 볼 추천 장소"></div>
       <div class="map-stage">
         <div class="map-canvas" id="tmapCanvas" role="region" aria-label="충전소와 추천 장소 지도" hidden></div>
-        <div class="map-empty" role="status"><p>장소를 선택하면 지도를 볼 수 있어요.</p><button class="map-retry" type="button" hidden>다시 시도</button></div>
+        <div class="map-tile-status" role="status" hidden><p></p><button class="map-tile-retry" type="button">지도 다시 불러오기</button></div>
+        <div class="map-empty" role="status"><p>장소를 선택하면 지도를 볼 수 있어요.</p><button class="map-retry" type="button" hidden>다시 시도</button><button class="map-start" type="button" hidden>추천받으러 가기</button></div>
       </div>
       <div class="map-controls" role="group" aria-label="표시할 도보 경로">
         <button type="button" data-direction="both" aria-pressed="true">왕복</button>
@@ -415,9 +418,10 @@
 <div id="notice" class="notice" role="status" hidden></div>
 
 <script src="map-config.js"></script>
-<script src="map.js"></script>
-<script src="home-volty.js"></script>
-<script src="features.js"></script>
-<script src="app.js"></script>
+<script src="map-leaflet.js?v=20260911-map-live"></script>
+<script src="map.js?v=20260911-map-live"></script>
+<script src="home-volty.js?v=20260911-smooth16"></script>
+<script src="features.js?v=20260911-map-live"></script>
+<script src="app.js?v=20260911-map-live"></script>
 </body>
 </html>

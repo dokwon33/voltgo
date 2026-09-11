@@ -76,33 +76,15 @@ def get_charging_status(runtime: ToolRuntime, force_refresh: bool = False) -> di
                       message=f"charging={snap.charging}, soc={snap.soc_pct}%, plug={snap.plug_type}").dump()
 
 
-def _apply_target_soc(charging, target_soc_pct: float):
-    """요청한 목표(target_soc_pct)와 차량이 실제로 설정한 목표(reported_target_soc_pct)가
-    다르면 방향에 따라 계산용 snapshot을 보정한다 (2.5.2, C028).
-    calculate_time_budget 과 confirm_plan 재검증이 같은 결과를 내도록 여기서만 처리한다.
-    사용자에게 보여줄 경고문은 assembler.collect_warnings 가 Session 값에서 별도로 다시 만든다.
-    """
-    api_target = charging.reported_target_soc_pct
-    if api_target is None or target_soc_pct == api_target:
-        return charging.model_copy(update={"target_soc_pct": target_soc_pct})
-    if target_soc_pct < api_target:
-        # 충전 경로상 반드시 지나가는 지점 -> 에너지 추정으로 전환 (remainTime 은 api_target 기준이라 못 믿는다)
-        return charging.model_copy(update={"target_soc_pct": target_soc_pct, "reported_remaining_sec": None})
-    # 차량이 api_target 에서 자동으로 멈춘다 -> 사용자 목표는 도달 불가, API 값 그대로 쓴다
-    return charging.model_copy(update={"target_soc_pct": api_target})
-
-
 # ---------------------------------------------------------------
 # 2. 시간 예산
 # ---------------------------------------------------------------
 @tool
-def calculate_time_budget(runtime: ToolRuntime, target_soc_pct: Optional[float] = None,
-                          user_limit_min: Optional[int] = None) -> dict:
+def calculate_time_budget(runtime: ToolRuntime, user_limit_min: Optional[int] = None) -> dict:
     """검증된 충전 정보와 사용자의 시간 제한으로 복귀 마감 시각과 지금 남은 가용 시간(초)을 계산합니다.
-    get_charging_status 다음에 호출합니다.
+    get_charging_status 다음에 호출합니다. 목표 충전량은 차량 조회값만 사용하며 변경할 수 없습니다.
 
     Args:
-        target_soc_pct: 목표 충전량(%). 사용자가 말한 값. 없으면 차량 설정값을 쓰고, 그것도 없으면 질문합니다.
         user_limit_min: 사용자가 말한 시간 제한(분). "30분 있어" -> 30. 없으면 None
     """
     ctx = runtime.context
@@ -112,20 +94,14 @@ def calculate_time_budget(runtime: ToolRuntime, target_soc_pct: Optional[float] 
     if s.charging is None:
         return tool_error("PRECONDITION_FAILED", "get_charging_status 를 먼저 호출하세요")
 
-    api_target = s.charging.reported_target_soc_pct   # 차량이 실제로 설정한 목표 원문값 (API 미제공이면 None)
-
-    if target_soc_pct is None:
-        if api_target is None:
-            return tool_error("NEED_INPUT", "목표 충전량을 몇 %로 할지 사용자에게 물어보세요.")
-        target_soc_pct = api_target          # 사용자가 말 안 하면 차량 설정 그대로 쓴다
-
-    if not (0 < target_soc_pct <= 100):
-        return tool_error("NEED_INPUT", "목표 SoC 는 0~100 사이여야 합니다")
+    target_soc_pct = s.charging.vehicle_target_soc_pct
+    if target_soc_pct is None or not (0 < target_soc_pct <= 100):
+        return tool_error("NEED_INPUT", "차량의 목표 충전량을 확인할 수 없습니다. 차량/앱의 설정을 확인하고 get_charging_status(force_refresh=True)로 다시 조회하세요. 대화에서 목표값을 입력받지 마세요.")
     if user_limit_min is not None and user_limit_min <= 0:
         return tool_error("NEED_INPUT", "시간 제한은 1분 이상이어야 합니다")
 
     # 조건이 바뀌면 이전 후보/승인은 버린다
-    if (target_soc_pct != s.target_soc_pct) or (user_limit_min != s.user_limit_min):
+    if (target_soc_pct != s.target_soc_pct) or (user_limit_min is not None and user_limit_min != s.user_limit_min):
         if s.candidates or s.confirmed:
             s.bump_version()
     s.target_soc_pct = target_soc_pct
@@ -133,10 +109,8 @@ def calculate_time_budget(runtime: ToolRuntime, target_soc_pct: Optional[float] 
         s.user_limit_min = user_limit_min
         s.limit_said_at = now       # 제한을 말한 시각 기준으로 마감을 잡는다
 
-    snap = _apply_target_soc(s.charging, target_soc_pct)
-
     # 같은 이름의 도구 함수와 겹치지 않게 모듈 경로로 부른다
-    budget, err = time_budget.calculate_time_budget(snap, now, buffer_min=ctx.buffer_min,
+    budget, err = time_budget.calculate_time_budget(s.charging, now, buffer_min=ctx.buffer_min,
                                                     user_limit_min=s.user_limit_min, limit_said_at=s.limit_said_at)
     if err is not None:
         msgs = {
@@ -419,10 +393,11 @@ def confirm_plan(runtime: ToolRuntime, plan_id: str, version: int) -> dict:
     except ClientError as e:
         return tool_error(e.code, str(e), retryable=e.retryable)
     budget, err = time_budget.calculate_time_budget(
-        _apply_target_soc(snap, s.target_soc_pct), now,
+        snap, now,
         buffer_min=ctx.buffer_min, user_limit_min=s.user_limit_min, limit_said_at=s.limit_said_at)
     if err is not None:
         return tool_error(err, "재검증 실패. 다시 계획하세요.")
+    s.target_soc_pct = snap.vehicle_target_soc_pct
     s.time_budget = budget
 
     rechecked = feasibility.recheck_plan(plan, budget, now)

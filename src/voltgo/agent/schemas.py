@@ -36,7 +36,7 @@ class ChargingSnapshot(BaseModel):
     """충전 상태 1건. 현대차 원문 필드는 clients/hyundai.py 어댑터에서 여기로 변환한다."""
     charging: Optional[bool] = None
     soc_pct: Optional[float] = None
-    target_soc_pct: Optional[float] = None    # 계산에 실제로 쓸 목표 (API가 안 주면 None, 2.5.2)
+    target_soc_pct: Optional[float] = None    # 공급자가 조회한 차량 목표. 대화에서 덮어쓰지 않는다.
     reported_target_soc_pct: Optional[float] = None  # API 원문 목표값 그대로 보관, 계산 경로에서 덮어쓰지 않음
     capacity_kwh: Optional[float] = None      # API 미제공 -> 정책값/사용자 입력
     capacity_source: Literal["manual", "mock", "unknown"] = "unknown"  # 값의 출처, source(전체 스냅샷)와 별개
@@ -47,6 +47,13 @@ class ChargingSnapshot(BaseModel):
     observed_at: datetime                     # 차량이 보낸 시각 (timestamp)
     fetched_at: Optional[datetime] = None     # 우리가 실제로 조회한 시각 (관측시각과 구분, 2.5.2)
     source: Literal["hyundai", "manual", "mock"]
+
+    @property
+    def vehicle_target_soc_pct(self) -> Optional[float]:
+        """API 원문을 우선한다. 원문 필드를 쓰지 않는 공급자는 조회한 target_soc_pct를 쓴다."""
+        if self.reported_target_soc_pct is not None:
+            return self.reported_target_soc_pct
+        return self.target_soc_pct
 
 
 class TimeBudget(BaseModel):

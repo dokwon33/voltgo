@@ -37,3 +37,20 @@
 @media (max-width: 360px) { .route-map { margin-inline: 12px; } .map-stage { height: 230px; } }
 
 .plan-label { display: inline-grid; place-items: center; flex: none; width: 26px; height: 26px; border-radius: 9px; background: var(--deep); color: white; font-family: var(--logo); font-size: 15px; font-weight: 900; line-height: 1; }
+
+/* Map navigation owns the content area; keep the conversation mounted for Back. */
+.chat.is-map > :not(.route-map):not(.chat-actions) { display: none; }
+.chat.is-map .route-map { flex: 1; min-height: 0; max-height: none; display: flex; flex-direction: column; margin-bottom: 16px; overflow-y: auto; }
+.chat.is-map .map-stage { flex: 1 0 240px; min-height: 240px; }
+.chat.is-map .map-heading, .chat.is-map .map-places, .chat.is-map .map-back,
+.chat.is-map .map-controls, .chat.is-map .map-note { flex-shrink: 0; }
+.phone:has(.chat.is-map:not([hidden])) > .composer { display: none; }
+.map-places { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 14px 12px; }
+.map-places:empty { display: none; }
+.map-places button, .map-start { padding: 9px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); font-size: 13px; text-align: left; overflow-wrap: anywhere; max-width: 100%; }
+.map-places button[aria-pressed="true"], .map-start { color: var(--deep); border-color: var(--green); background: var(--soft); }
+@media (max-height: 650px) { .chat.is-map .map-stage { flex-basis: 200px; min-height: 200px; } }
+.map-canvas { isolation: isolate; }
+.map-tile-status { position: absolute; z-index: 1100; inset: auto 10px 28px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); font-size: 13px; }
+.map-tile-status p { margin: 0 0 8px; }
+.map-tile-retry { border: 1px solid var(--green); border-radius: 10px; background: var(--soft); padding: 6px 10px; color: var(--deep); }

@@ -59,23 +59,25 @@ def test_map_config_exposes_only_explicit_browser_key(monkeypatch, browser_key):
     assert b'server-openai-test-key' not in raw
 
 
-def test_requested_target_does_not_relabel_vehicle_duration(context, snapshot, budget):
+def test_legacy_session_target_cannot_override_vehicle_display(context, snapshot, budget):
     context.session.charging = snapshot.model_copy(update={'target_soc_pct': 90, 'reported_target_soc_pct': 90, 'reported_remaining_sec': 3600})
     context.session.time_budget = budget
     context.session.target_soc_pct = 80
     result = web.session_summary(context)
     assert result['charging']['reported_target_soc_pct'] == 90
-    assert result['effective_target_soc_pct'] == 80
-    assert result['display_charging']['reported_remaining_sec'] is None
-    assert result['home_budget']['finish_at'].endswith('14:30:00+09:00')
-    assert result['home_budget']['estimate_basis'] == 'energy_power'
+    assert result['effective_target_soc_pct'] == 90
+    assert result['display_charging']['target_soc_pct'] == 90
+    assert result['display_charging']['reported_remaining_sec'] == 3600
+    assert result['home_budget']['finish_at'].endswith('15:00:00+09:00')
+    assert result['home_budget']['estimate_basis'] == 'reported_remaining'
+    assert 'requested_target_soc_pct' not in result
 
 
 def test_unknown_goal_stays_unknown(context, snapshot):
     context.session.charging = snapshot.model_copy(update={'target_soc_pct': None, 'reported_target_soc_pct': None})
     result = web.session_summary(context)
     assert result['effective_target_soc_pct'] is None
-    assert result['requested_target_soc_pct'] is None
+    assert 'requested_target_soc_pct' not in result
     assert result['home_budget'] is None
 
 

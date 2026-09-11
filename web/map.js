@@ -6,7 +6,7 @@
     if (window.Tmapv2?.Map) return Promise.resolve(window.Tmapv2);
     if (sdkPromise) return sdkPromise;
     const key = window.VOLTGO_MAP_CONFIG?.appKey?.trim();
-    if (!key) return Promise.reject(new Error('지도를 불러올 수 없어요. 장소와 이동 시간은 추천 카드에서 확인해 주세요.'));
+    if (!key) return window.loadVoltGoOpenMap();
     sdkPromise = new Promise((resolve, reject) => {
       const script = document.createElement('script');
       script.src = 'https://apis.openapi.sk.com/tmap/jsv2?version=1&appKey=' + encodeURIComponent(key);
@@ -58,6 +58,10 @@
       this.resizeObserver.observe(panel.querySelector('.map-stage'));
       panel.querySelector('.map-retry').addEventListener('click', () => this.render());
       panel.querySelector('.map-fit').addEventListener('click', () => this.fit());
+      panel.querySelector('.map-tile-retry').addEventListener('click', () => {
+        panel.querySelector('.map-tile-status').hidden = true;
+        this.map?.retryTiles?.();
+      });
       panel.querySelectorAll('[data-direction]').forEach((button) => button.addEventListener('click', () => {
         this.direction = button.dataset.direction;
         this.render();
@@ -106,39 +110,71 @@
       this.panel.querySelector('.map-retry').hidden = !retry;
       this.canvas.hidden = true;
       this.panel.querySelector('.map-fit').disabled = true;
+      this.panel.querySelector('.map-fit').hidden = true;
+      this.panel.querySelector('.map-controls').hidden = true;
+      this.panel.querySelector('.map-tile-status').hidden = true;
+    }
+
+    overview(data) {
+      this.overviewData = data || {};
+      this.selected = null;
+      this.panel.hidden = false;
+      this.render();
     }
 
     async render() {
       const revision = ++this.revision;
       const entry = this.entries.get(this.selected);
-      if (!entry) return;
+      if (!entry && !this.overviewData) return;
       this.clearOverlays();
-      const { candidate, candidates, data, label, labels } = entry;
+      const { candidate, candidates, data, label, labels } = entry || {candidate: null, candidates: [], data: this.overviewData, label: '', labels: []};
+      this.panel.querySelector('.map-start').hidden = Boolean(entry);
+      const choices = this.panel.querySelector('.map-places');
+      choices.replaceChildren();
+      candidates.forEach((place, index) => {
+        const match = [...this.entries].find(([, e]) => e.data === data && e.candidate === place);
+        if (!match) return;
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.dataset.mapChoice = match[0];
+        button.textContent = `${labels[index]} · ${place.name}`;
+        button.setAttribute('aria-pressed', String(match[0] === this.selected));
+        button.addEventListener('click', () => this.select(match[0]));
+        choices.append(button);
+      });
       const places = Array.isArray(data.places) ? data.places : [];
       const routes = Array.isArray(data.routes) ? data.routes : [];
-      const place = places.find((p) => p?.poi_id === candidate.poi_id);
+      const place = candidate && places.find((p) => p?.poi_id === candidate.poi_id);
       const origin = point(data.origin), destination = point(place);
-      this.panel.querySelector('.map-place').textContent = `${label} · ${candidate.name}`;
+      this.panel.querySelector('.map-place').textContent = candidate ? `${label} · ${candidate.name}` : data.origin?.name || '근처 추천 장소';
       this.panel.querySelector('.map-note').textContent = '';
       this.panel.querySelectorAll('[data-direction]').forEach((button) => {
         button.setAttribute('aria-pressed', String(button.dataset.direction === this.direction));
       });
       if (!origin && !destination) {
-        this.message('장소 위치를 아직 받지 못했어요. 위치가 준비되면 지도에서 볼 수 있어요.');
+        this.message(candidate ? '장소 위치를 아직 받지 못했어요. 위치가 준비되면 지도에서 볼 수 있어요.' : '출발 충전소를 알려 주세요. 위치를 확인하면 주변 지도를 보여드릴게요.');
         return;
       }
       this.message('지도를 불러오는 중이에요…');
       try {
         const T = await loadSDK();
         if (revision !== this.revision) return;
+        this.sdk = T;
         this.canvas.hidden = false;
         if (!this.map) {
           const center = origin || destination;
           this.map = new T.Map(this.canvas.id, { center: new T.LatLng(center[1], center[0]), width: '100%', height: '100%', zoom: 16, zoomControl: true, scrollwheel: false, httpsMode: true });
+          this.map.onTileStatus = text => {
+            if (this.panel.hidden || this.canvas.hidden) return;
+            this.panel.querySelector('.map-tile-status p').textContent = text;
+            this.panel.querySelector('.map-tile-status').hidden = !text;
+          };
         }
         this.map.resize('100%', '100%');
         this.panel.querySelector('.map-empty').hidden = true;
         this.panel.querySelector('.map-fit').disabled = false;
+        this.panel.querySelector('.map-fit').hidden = false;
+        this.panel.querySelector('.map-controls').hidden = !candidate;
         const latLng = (p) => new T.LatLng(p[1], p[0]);
         const addMarker = (coords, label, color, title, onClick) => {
           const marker = new T.Marker({ position: latLng(coords), map: this.map, icon: icon(label, color), iconSize: new T.Size(32, 40), title });
@@ -146,6 +182,11 @@
           this.overlays.push(marker);
         };
         if (origin) { addMarker(origin, '⚡', '#1B2620', '출발 충전소'); this.fitPoints.push(origin); }
+        if (!candidate) {
+          this.panel.querySelector('.map-note').textContent = '출발 충전소 주변이에요. 장소를 추천받으면 지도에서 함께 볼 수 있어요.';
+          this.fit();
+          return;
+        }
         candidates.forEach((c, index) => {
           const p = places.find((p) => p?.poi_id === c.poi_id), coords = point(p);
           if (!coords) return;
@@ -181,7 +222,7 @@
 
     fit() {
       if (!this.map || !this.fitPoints?.length) return;
-      const T = window.Tmapv2;
+      const T = this.sdk;
       const [lon, lat] = this.fitPoints[0];
       if (this.fitPoints.every((p) => p[0] === lon && p[1] === lat)) {
         this.map.setCenter(new T.LatLng(lat, lon)); this.map.setZoom(16); return;
@@ -205,6 +246,7 @@
       this.hide();
       this.entries.clear();
       this.selected = null;
+      this.overviewData = null;
       this.direction = 'both';
     }
   }
