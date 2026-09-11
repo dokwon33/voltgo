@@ -11,7 +11,7 @@ from typing import Optional
 from voltgo.agent.schemas import CandidatePlan, Place, RoundTrip, TimeBudget
 from voltgo.core.place_policy import dwell_sec_for
 
-
+# 하나의 Place와 RoundTrip을 받아 복귀 가능한지 계산
 def build_plan(place: Place, trip: RoundTrip, budget: TimeBudget, now: datetime,
                dwell_sec: int, version: int) -> Optional[CandidatePlan]:
     """시간 안에 들어오면 CandidatePlan, 아니면 None"""
@@ -48,7 +48,7 @@ def build_plan(place: Place, trip: RoundTrip, budget: TimeBudget, now: datetime,
         evaluated_at=now,
     )
 
-
+# 여러 장소를 대상으로 build_plan()을 반복
 def select_feasible_plans(places: dict[str, Place], routes: dict[str, RoundTrip],
                           budget: TimeBudget, now: datetime, version: int,
                           dwell_overrides: Optional[dict[str, int]] = None,
@@ -74,7 +74,7 @@ def select_feasible_plans(places: dict[str, Place], routes: dict[str, RoundTrip]
     ))
     return plans
 
-
+# 승인 시점에 기존 계획을 현재 시각으로 다시 계산
 def recheck_plan(plan: CandidatePlan, budget: TimeBudget, now: datetime) -> Optional[CandidatePlan]:
     """
     승인 직후 같은 계산을 다시 돌린다 (설계서 C006).
