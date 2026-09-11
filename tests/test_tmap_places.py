@@ -292,6 +292,65 @@ def test_search_widen_to_1000_finds_far_cafe(context):
 
 
 # ---------------------------------------------------------------
+# 도구: 반경 넓히기 - API 재호출 없이 다시 거르기
+# ---------------------------------------------------------------
+def test_widen_reuses_fetched_list(context):
+    tools.get_charging_status.func(rt(context))
+    tools.calculate_time_budget.func(rt(context), user_limit_min=30)
+    r = tools.search_nearby_places.func(rt(context), category="cafe")
+    assert r["data"] == [] and "max_dist_m=1000" in r["message"]       # 넓힐 여지가 있다고 알려 준다
+    api_before = context.session.counters["api"]
+
+    r = tools.search_nearby_places.func(rt(context), category="cafe", max_dist_m=1000)
+    assert [p["poi_id"] for p in r["data"]] == ["D"] and "재사용" in r["message"]
+    assert context.places_client.calls == 1
+    assert context.session.counters["api"] == api_before              # 외부 API 한도도 쓰지 않는다
+
+
+def test_empty_at_max_radius_says_stop_widening(context):
+    tools.get_charging_status.func(rt(context))
+    tools.calculate_time_budget.func(rt(context), user_limit_min=30)
+    r = tools.search_nearby_places.func(rt(context), category="mart", max_dist_m=1000)
+    assert r["data"] == [] and "더 넓히지 말고" in r["message"]
+
+
+def test_other_category_still_calls_api(context):
+    tools.get_charging_status.func(rt(context))
+    tools.calculate_time_budget.func(rt(context), user_limit_min=30)
+    tools.search_nearby_places.func(rt(context), category="meal")
+    tools.search_nearby_places.func(rt(context), category="cafe")
+    assert context.places_client.calls == 2
+
+
+def test_origin_change_drops_cache(context):
+    tools.get_charging_status.func(rt(context))
+    tools.calculate_time_budget.func(rt(context), user_limit_min=30)
+    tools.search_nearby_places.func(rt(context), category="meal")
+    tools.find_station.func(rt(context), keyword="강남역 EV충전소")
+    assert context.session.place_cache == {}
+    tools.search_nearby_places.func(rt(context), category="meal")
+    assert context.places_client.calls == 2                            # 새 출발지는 다시 조회
+
+
+def test_failed_search_is_not_cached(context):
+    tools.get_charging_status.func(rt(context))
+    tools.calculate_time_budget.func(rt(context), user_limit_min=30)
+    ok_client = context.places_client
+
+    class Down:
+        def search_around(self, *a, **kw):
+            raise ClientError("UPSTREAM", "TMAP 5xx", retryable=True)
+
+    context.places_client = Down()
+    r = tools.search_nearby_places.func(rt(context), category="meal")
+    assert r["error_code"] == "UPSTREAM" and context.session.place_cache == {}
+
+    context.places_client = ok_client                                  # 복구 뒤에는 실제로 다시 조회한다
+    r = tools.search_nearby_places.func(rt(context), category="meal")
+    assert r["data"] and ok_client.calls == 1
+
+
+# ---------------------------------------------------------------
 # 도구: 반경 자동 조정
 # ---------------------------------------------------------------
 def _budget_no_limit(context):
@@ -308,7 +367,7 @@ def test_auto_radius_widens_when_time_is_ample(context):
     # 사용자가 "5분이면 돼" -> 편도 15분 -> 810m : D 가 들어온다
     r = tools.search_nearby_places.func(rt(context), category="cafe", dwell_min=5)
     assert [p["poi_id"] for p in r["data"]] == ["D"]
-    assert context.places_client.calls == 2
+    assert context.places_client.calls == 1       # 반경만 바뀌었으니 받아 둔 목록을 다시 거른다
 
 
 def test_explicit_max_dist_wins_over_auto(context):
