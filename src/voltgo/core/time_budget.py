@@ -44,6 +44,8 @@ def calculate_time_budget(
     # 1. 충전 중이 아니거나 이미 목표에 도달 -> 외출 계획 없음 (C003)
     if snapshot.charging is False:
         return None, "NOT_CHARGING"
+    if snapshot.target_soc_pct is None:
+        return None, "NEED_INPUT"     # 목표를 모르면 비교/추정하지 않고 질문
     if snapshot.soc_pct is not None and snapshot.soc_pct >= snapshot.target_soc_pct:
         return None, "TARGET_REACHED"
 
