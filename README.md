@@ -3,7 +3,7 @@
 > **전기차 충전 대기시간 활용 에이전트**
 > 충전이 끝나기 전에 다녀올 수 있는 식사·쇼핑 등 볼일을 골라, 이동 동선과 복귀 시각을 계획해 주는 AI 에이전트
 
-> 🛠️ **현재 상태: 기본 구현 완료 + 파트별 실연동 진행 중** — Mock 데이터로 `충전 조회 → 시간 예산 → 장소 검색 → 왕복 경로 → 선별 → 승인/확정 → 선호 기억` 전체 흐름이 돌아갑니다. TMAP 장소 검색·보행 경로는 실호출 확인 완료, 현대차는 Mock 이 기본입니다.
+> 🛠️ **현재 상태: 기본 구현 완료 + 파트별 실연동 진행 중** — Mock 데이터로 `충전 조회 → 시간 예산 → 장소 검색 → 왕복 경로 → 선별 → 선택·재검증·확정 → 동의 후 선호 기억` 전체 흐름이 돌아갑니다. TMAP 장소 검색·보행 경로는 실호출 확인 완료, 현대차는 Mock 이 기본입니다.
 > 설계서: [`docs/최종_VoltGo_Agent_설계서.docx`](docs/최종_VoltGo_Agent_설계서.docx), 발표본: [`docs/6반_4조.pdf`](docs/6반_4조.pdf)
 
 ## 팀 역할
@@ -101,13 +101,13 @@ flowchart LR
 | 강점 | 제약사항 |
 | --- | --- |
 | 강사 목록 API 2개(TMAP 장소 검색·보행자 경로) 활용 | 현대차 API 접근이 불확실함 |
-| 남은 시간·왕복 보행 시간 계산이 코드로 정확함 | 승인·기억 지점이 약함 (Human-in-the-loop 설계 필요) |
+| 시간 계산·복귀 가능 판정을 코드로 수행 | 실제 충전·체류 시간은 변동 가능 |
 | 생활 밀착형 체감 효과 | 실패 시 현대차 부분은 시연 데이터로 대체해야 함 |
 
 ### 제약 대응 방안 (초안)
 
 - **현대차 API 불확실성** → `ChargingStatusProvider` 인터페이스로 추상화하고, 실제 API 구현체와 **Mock 구현체**(`data/mock/`)를 교체 가능하게 설계한다.
-- **승인·기억 지점 보완** → 추천 후 사용자 선택(승인) 단계, 선호 카테고리·자주 가는 장소 기억 기능을 검토한다.
+- **선택·기억** → 후보 선택 후 최신 조건으로 재검증하여 확정한다. 명시적으로 요청한 카테고리·체류시간 선호만 별도 승인 후 저장한다.
 
 ## 7. 프로젝트 구조
 
@@ -127,14 +127,14 @@ voltgo/
 │   ├── core/                 # 결정적 계산 (순수 함수, API/LLM 모름)
 │   │   ├── time_budget.py    #   잔여시간 → 충전 완료 시각 → 복귀 마감 → 가용시간(초)
 │   │   ├── place_policy.py   #   카테고리 매핑, 체류 기본값, 500m 필터, 중복 제거
-│   │   └── feasibility.py    #   왕복+체류 ≤ 가용시간 판정, 정렬, 승인 뒤 재검증
+│   │   └── feasibility.py    #   왕복+체류 ≤ 가용시간 판정, 정렬, 선택 뒤 재검증
 │   └── agent/                # LangChain 에이전트
 │       ├── schemas.py        #   Pydantic 데이터 계약 (ToolResult, ModelDecision, VoltGoResponse …)
 │       ├── state.py          #   Runtime Context / Session (Tool 들이 공유하는 상태)
 │       ├── tools.py          #   @tool 9개 (get_charging_status … delete_preferences)
 │       ├── prompts.py        #   System prompt, few-shot
 │       ├── middleware.py     #   입력 검사·선호 주입·호출 한도·도구 정책·출력 검증
-│       ├── approval.py       #   Human-in-the-loop (confirm_plan, save_preferences 승인)
+│       ├── approval.py       #   Human-in-the-loop (save_preferences만 승인)
 │       ├── memory.py         #   사용자 선호 JSON 저장 (장기 기억)
 │       ├── assembler.py      #   ModelDecision + Session → VoltGoResponse (숫자는 코드가 채움)
 │       └── agent.py          #   create_agent 조립, ask() / decide()
@@ -161,9 +161,10 @@ voltgo/
 | 모델 | `agent.py` `init_chat_model(MODEL_NAME)` | 기본 `gpt-4.1-mini`, temperature 0.1, timeout 10s |
 | 도구 순서 | `(find_station) → get_charging_status → calculate_time_budget → search_nearby_places → get_walking_routes → select_feasible_plans` | 순서를 어기면 `PRECONDITION_FAILED`. 출발지가 없으면 `find_station` 먼저 |
 | 구조화 출력 | `ToolStrategy(ModelDecision)` | 모델은 후보 ID·설명만. 시각/상호/소요시간은 `assembler.py` 가 Session 에서 채움 |
-| 승인 | `HumanInTheLoopMiddleware` (`confirm_plan`, `save_preferences`) | `awaiting_approval` 상태로 멈추고, `decide(agent, "approve" / "reject", …)` 로 재개 |
+| 계획 확정 | `confirm_plan` | 사용자 선택 후 현재 시각·충전 상태로 재검증. 추가 승인 화면 없음 |
+| 선호 저장 승인 | `HumanInTheLoopMiddleware` (`save_preferences`) | `awaiting_approval`에서 `decide(agent, "approve" / "reject", …)`로 재개. 요청 후 120초 초과 시 저장 거절 |
 | 단기 기억 | `InMemorySaver` + `thread_id` | 프로세스 재시작 후 복원은 보장하지 않음 |
-| 장기 기억 | `data/prefs/{user_id}.json` | 명시적 "기억해줘" + 승인 뒤에만 저장 |
+| 장기 기억 | `data/prefs/{safe_user_id}-{hash}.json` | 명시적 "기억해줘" + 승인 뒤에만 저장 |
 | 한도 | 모델 8회 · Tool 12회 · 외부 API 24회 | `middleware.py` |
 
 ## 8. 실행 방법
@@ -188,7 +189,7 @@ python scripts/demo.py --fixed   # 14:00 고정 시계 (설계서 C001 조건)
 
 ```
 질문: 30분 정도 있는데 간단히 밥 먹고 싶어. 12분이면 먹어.
-질문: 1번으로 확정할게          → [승인 요청] approve / reject
+질문: 1번으로 확정할게          → 최신 조건으로 재검증 후 확정 또는 재계획
 질문: 카페를 선호해. 다음에도 기억해줘   → [승인 요청] approve / reject
 ```
 
@@ -252,3 +253,5 @@ print(res.status, res.message)
 - [ ] 현대차 충전 상태 실호출 — B
 - [x] `agent/` LLM 에이전트 연결 (도구·구조화 출력·HITL·미들웨어)
 - [ ] 시연 시나리오 구성
+
+설계서 대비 변경사항: [AS-IS / TO-BE 및 팀별 PR 반영 상태](docs/설계서_변경사항_20260911_2.md).

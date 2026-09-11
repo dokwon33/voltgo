@@ -54,8 +54,8 @@ def build_agent(model=None, checkpointer=None):
             preference_prompt,      # wrap_model_call
             model_budget,           # wrap_model_call
             tool_policy,            # wrap_tool_call
-            mark_approval_requested,  # after_model - 승인 요청 시각 기록 (HITL 보다 먼저)
-            approval_middleware(),  # after_model (HITL)
+            approval_middleware(),  # after_model: 선호 저장만 승인 대기
+            mark_approval_requested,  # after_model은 등록 역순: HITL 중단 전에 시각 기록
             output_integrity,       # after_agent
         ],
         checkpointer=checkpointer or InMemorySaver(),   # 단기 메모리 (thread_id 별)

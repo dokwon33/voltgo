@@ -31,6 +31,12 @@ def collect_warnings(context: Context) -> list[str]:
         w.append("충전 정보는 Mock 데이터입니다")
     if s.time_budget and s.time_budget.estimate_basis == "energy_power":
         w.append("잔여시간은 배터리 용량·평균 전력 정책값으로 추정한 값입니다")
+    if s.charging and s.charging.reported_target_soc_pct is not None and s.target_soc_pct != s.charging.reported_target_soc_pct:
+        api_t, user_t = s.charging.reported_target_soc_pct, s.target_soc_pct
+        if user_t < api_t:
+            w.append(f"차량은 {api_t:.0f}%까지 자동 충전되도록 설정돼있어요. {user_t:.0f}% 충전 도달 시각은 추정치입니다.")
+        else:
+            w.append(f"차량은 {api_t:.0f}%에서 자동으로 충전이 멈추도록 설정돼있어요. {user_t:.0f}%까지 채우려면 차량 앱에서 직접 목표를 올려주세요.")
     if s.places and all(p.poi_source == "mock" for p in s.places.values()):
         w.append("장소 정보는 Mock 데이터입니다")
     if s.routes and all(r.route_source == "mock" for r in s.routes.values()):
@@ -96,17 +102,11 @@ def assemble(result: dict, context: Context) -> VoltGoResponse:
     if result.get("__interrupt__"):
         req = result["__interrupt__"][0].value
         action = (req.get("action_requests") or [{}])[0]
-        name = action.get("name", "")
-        args = action.get("args", {})
-        if name == "confirm_plan":
-            plan = s.candidates.get(args.get("plan_id"))
-            what = f"'{plan.name}' 계획을 확정할까요?" if plan else "계획을 확정할까요?"
-            cands = [plan] if plan else []
-        else:
-            what = f"선호를 저장할까요? ({args})"
-            cands = []
+        # 승인 대상은 save_preferences 뿐 (계획 확정은 승인 없이 도구가 재검증). 문구는 HITL description 을 쓴다
+        what = action.get("description") or f"선호를 저장할까요? ({action.get('args', {})})"
+        cands = []
         others = (req.get("action_requests") or [])[1:]
-        if others:   # 확정과 저장이 함께 제안된 경우, 두 번째 이후 요청도 보여준다
+        if others:   # 승인 대상이 둘 이상이면 두 번째 이후 요청도 보여준다
             what += " 그리고 " + " / ".join(o.get("description") or o.get("name", "") for o in others)
         msg = render_message(context, cands, what + " (approve / reject)", "awaiting_approval")
         return VoltGoResponse(status="awaiting_approval", message=msg, candidates=cands,

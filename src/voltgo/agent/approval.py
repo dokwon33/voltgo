@@ -1,13 +1,16 @@
 """
 Human-in-the-loop (설계서 3.2 HumanInTheLoopMiddleware)
 
-노트북 [5] 2-1 ③ 패턴. confirm_plan / save_preferences 두 도구만 사람 승인을 거친다.
-읽기 도구는 승인 없이 진행. 승인 상태를 true 로 주는 모델 인자는 없다 - 재개 결정으로만 생긴다.
+노트북 [5] 2-1 ③ 패턴. 사람 승인을 거치는 도구는 save_preferences 하나다.
+- 계획 확정(confirm_plan)은 사용자가 후보를 고른 발화 자체가 결정이라 승인 화면을 띄우지 않는다.
+  대신 도구 안에서 현재 시각·최신 충전 상태로 다시 검증한 뒤 기록한다.
+- 읽기 도구와 delete_preferences 는 승인 없이 진행한다.
+승인 상태를 true 로 주는 모델 인자는 없다 - 재개 결정(Command(resume=...))으로만 생긴다.
 """
 from langchain.agents.middleware import HumanInTheLoopMiddleware, after_model
 from langgraph.types import Command
 
-APPROVAL_TOOLS = ("confirm_plan", "save_preferences")
+APPROVAL_TOOLS = ("save_preferences",)
 
 
 def _describe(tool_call, state=None, runtime=None):
@@ -17,8 +20,6 @@ def _describe(tool_call, state=None, runtime=None):
     description(tool_call, state, runtime) 3 인자로 부른다.
     """
     args = tool_call.get("args", {})
-    if tool_call["name"] == "confirm_plan":
-        return f"계획 {args.get('plan_id')} (v{args.get('version')}) 을(를) 확정할까요?"
     if tool_call["name"] == "save_preferences":
         items = ", ".join(f"{k}={v}" for k, v in args.items() if v is not None) or "없음"
         return f"선호를 저장할까요? ({items})"
@@ -29,28 +30,28 @@ def _describe(tool_call, state=None, runtime=None):
 def mark_approval_requested(state, runtime):
     """승인 화면을 보여주기 직전에 그 시각을 남긴다.
 
-    확정 만료를 재려면 '후보를 만든 시각'이 아니라 '사용자에게 승인을 물어본 시각'이
-    필요하다. HITL 미들웨어보다 먼저 등록해 interrupt 로 멈추기 전에 기록한다.
+    승인 만료(2분)를 재려면 '사용자에게 승인을 물어본 시각'이 필요하다.
+    after_model 훅은 등록한 순서의 **역순**으로 실행되므로, 이 훅은 미들웨어 목록에서
+    HumanInTheLoopMiddleware 보다 *뒤에* 등록해야 interrupt 로 멈추기 전에 먼저 돈다.
+    승인 화면이 새로 뜰 때마다 덮어쓴다 (거절 뒤 다시 요청하면 그 시각부터 다시 잰다).
     """
     messages = state.get("messages") or []
     if not messages:
         return None
     calls = getattr(messages[-1], "tool_calls", None) or []
     if any(c.get("name") in APPROVAL_TOOLS for c in calls):
-        session = runtime.context.session
-        if session.approval_requested_at is None:
-            session.approval_requested_at = runtime.context.clock()
+        runtime.context.session.approval_requested_at = runtime.context.clock()
     return None
 
 
 def approval_middleware():
     return HumanInTheLoopMiddleware(
         interrupt_on={
-            # 계획 확정 전에 사람 판단 개입 (approve / reject 만)
-            "confirm_plan": {"allowed_decisions": ["approve", "reject"], "description": _describe},
-            # 선호 저장도 명시 동의 뒤에만
+            # 선호 저장은 명시 동의 뒤에만 (approve / reject 만)
             "save_preferences": {"allowed_decisions": ["approve", "reject"], "description": _describe},
-            # 나머지는 자동 진행
+            # 계획 확정은 승인 없이 진행 - 후보를 고른 발화가 곧 결정이고, 도구가 재검증한다
+            "confirm_plan": False,
+            # 삭제도 승인 없이 진행 (설계서 interrupt_on=False)
             "delete_preferences": False,
         }
     )

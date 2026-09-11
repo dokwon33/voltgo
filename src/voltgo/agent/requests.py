@@ -63,7 +63,7 @@ def present_result(result, context):
             request_id = uuid4().hex
             request = ApprovalRequest(
                 payload=payload, interrupt_ids=ids, action_count=count,
-                requested_at=context.clock())
+                requested_at=session.approval_requested_at or context.clock())
             session.approval_requests[request_id] = request
             session.pending_request_id = request_id
         request_id = session.pending_request_id

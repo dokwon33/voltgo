@@ -22,7 +22,7 @@ CALLS = {"confirm": 0, "save": 0, "delete": 0}
 
 @tool
 def confirm_plan(plan_id: str, version: int = 1) -> str:
-    """계획을 확정한다. 승인 후에만 실행되어야 한다."""
+    """사용자가 선택한 계획을 확정한다. 별도 승인 없이 실행한다."""
     CALLS["confirm"] += 1
     return f"confirmed {plan_id}"
 
@@ -91,35 +91,42 @@ def _interrupts(result):
 
 
 # ---------------------------------------------------------------- C002
-def test_확정은_승인_전에_실행되지_않고_승인_후_한_번만_실행된다():
+def test_계획_확정은_별도_승인_없이_실행된다():
     agent = _build([
         _ai([_tc("confirm_plan", {"plan_id": "A", "version": 1}, "t1")]),
         AIMessage(content="확정했습니다."),
     ])
-    out = agent.invoke({"messages": [("user", "A 계획으로 확정")]}, _cfg("hitl-1"))
+    out = agent.invoke({"messages": [("user", "A 계획으로 확정")]}, _cfg("hitl-plan"))
+    assert not _interrupts(out)
+    assert CALLS["confirm"] == 1
 
-    assert _interrupts(out), "승인 요청(interrupt)이 발생해야 한다"
-    assert CALLS["confirm"] == 0, "승인 전에는 실행되면 안 된다"
 
-    agent.invoke(resume_command("approve"), _cfg("hitl-1"))
-    assert CALLS["confirm"] == 1, "승인 후 정확히 1회 실행"
+def test_선호_저장은_승인_전에_실행되지_않고_승인_후_한_번만_실행된다():
+    agent = _build([
+        _ai([_tc("save_preferences", {"category": "cafe"}, "t1")]),
+        AIMessage(content="저장했습니다."),
+    ])
+    out = agent.invoke({"messages": [("user", "카페 선호 기억해줘")]}, _cfg("hitl-save"))
+    assert _interrupts(out)
+    assert CALLS["save"] == 0
+    agent.invoke(resume_command("approve"), _cfg("hitl-save"))
+    assert CALLS["save"] == 1
 
 
 # ---------------------------------------------------------------- C016
-def test_거절하면_실행되지_않는다():
+def test_선호_저장을_거절하면_실행되지_않는다():
     agent = _build([
-        _ai([_tc("confirm_plan", {"plan_id": "A", "version": 1}, "t1")]),
-        AIMessage(content="확정하지 않았습니다."),
+        _ai([_tc("save_preferences", {"category": "cafe"}, "t1")]),
+        AIMessage(content="저장하지 않았습니다."),
     ])
-    agent.invoke({"messages": [("user", "A 계획으로 확정")]}, _cfg("hitl-2"))
-    assert CALLS["confirm"] == 0
-
+    agent.invoke({"messages": [("user", "카페 기억해줘")]}, _cfg("hitl-2"))
+    assert CALLS["save"] == 0
     agent.invoke(resume_command("reject", "사용자가 취소"), _cfg("hitl-2"))
-    assert CALLS["confirm"] == 0, "거절했는데 실행되면 안 된다"
+    assert CALLS["save"] == 0
 
 
 # ---------------------------------------------------------------- 복수 승인
-def test_확정과_저장이_함께_오면_결정을_각각_적용한다():
+def test_확정과_저장이_함께_와도_선호_저장만_승인_대상이다():
     agent = _build([
         _ai([_tc("confirm_plan", {"plan_id": "A", "version": 1}, "t1"),
              _tc("save_preferences", {"category": "cafe"}, "t2")]),
@@ -129,10 +136,11 @@ def test_확정과_저장이_함께_오면_결정을_각각_적용한다():
     assert _interrupts(out)
     assert CALLS["confirm"] == 0 and CALLS["save"] == 0
 
-    # 계획은 승인, 선호 저장은 거절 - 요청 순서대로 대응
-    agent.invoke(resume_command(["approve", "reject"]), _cfg("hitl-3"))
-    assert CALLS["confirm"] == 1, "승인한 확정은 실행"
-    assert CALLS["save"] == 0, "거절한 저장은 미실행 (계획 승인으로 자동 승인되면 안 된다)"
+    requests = _interrupts(out)[0].value["action_requests"]
+    assert [r["name"] for r in requests] == ["save_preferences"]
+    agent.invoke(resume_command("reject"), _cfg("hitl-3"))
+    assert CALLS["confirm"] == 1, "계획 확정은 별도 승인 대상이 아니다"
+    assert CALLS["save"] == 0, "선호 저장을 거절하면 저장하지 않는다"
 
 
 # ---------------------------------------------------------------- 읽기/삭제 도구
@@ -147,9 +155,8 @@ def test_승인_대상이_아닌_도구는_바로_실행된다():
 
 
 # ---------------------------------------------------------------- 승인 화면 문구
-def test_승인_화면에_계획_ID_와_선호_내용이_보인다():
+def test_승인_화면에_저장할_선호_내용이_보인다():
     from voltgo.agent.approval import _describe
-    assert "A" in _describe(_tc("confirm_plan", {"plan_id": "A", "version": 2}, "t1"))
     assert "cafe" in _describe(_tc("save_preferences", {"category": "cafe"}, "t2"))
 
 
@@ -184,30 +191,22 @@ def _plan_ready(context):
     return context.session.candidates["A"].version
 
 
-def test_승인_요청_후_2분이_지나면_확정을_거절한다(context):
-    version = _plan_ready(context)
-    s = context.session
-    base = context.clock()
-    s.approval_requested_at = base - timedelta(seconds=121)
-
-    r = tools.confirm_plan.func(_RT(context), plan_id="A", version=version)
+def test_승인_요청_후_2분이_지나면_선호_저장을_거절한다(context):
+    context.session.approval_requested_at = context.clock() - timedelta(seconds=121)
+    r = tools.save_preferences.func(_RT(context), category="cafe")
     assert r["status"] == "error"
     assert r["error_code"] == "APPROVAL_EXPIRED"
-    assert s.confirmed is None, "만료된 승인으로 확정되면 안 된다"
 
 
-def test_승인_요청_직후에는_후보_생성_시각이_조금_지나도_확정된다(context):
-    """후보를 만든 시각이 아니라 승인을 물어본 시각으로 재야 한다."""
+def test_계획_확정은_선호_승인_시각에_영향받지_않는다(context):
     version = _plan_ready(context)
     s = context.session
     base = context.clock()
-    # 후보는 2분 30초 전에 만들었지만, 승인은 방금 물어봤다
     s.candidates["A"].evaluated_at = base - timedelta(seconds=150)
-    s.approval_requested_at = base
-
+    s.approval_requested_at = base - timedelta(seconds=121)
     r = tools.confirm_plan.func(_RT(context), plan_id="A", version=version)
-    assert r["status"] == "ok", "승인 직후인데 후보 생성 시각 때문에 거절되면 안 된다"
-    assert s.approval_requested_at is None, "확정 후에는 다음 승인을 새로 잰다"
+    assert r["status"] == "ok"
+    assert s.approval_requested_at == base - timedelta(seconds=121)
 
 
 def test_후보가_너무_오래되면_따로_거절한다(context):
@@ -231,7 +230,7 @@ def test_승인_요청_시각은_승인_화면이_뜰_때_기록된다(context):
     assert s.approval_requested_at is None
 
     state = {"messages": [AIMessage(content="", tool_calls=[
-        {"name": "confirm_plan", "args": {"plan_id": "A", "version": 1}, "id": "t1", "type": "tool_call"}])]}
+        {"name": "save_preferences", "args": {"category": "cafe"}, "id": "t1", "type": "tool_call"}])]}
     mark_approval_requested.after_model(state, _RT(context))
     assert s.approval_requested_at == context.clock()
 

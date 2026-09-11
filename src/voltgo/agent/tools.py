@@ -13,7 +13,7 @@ from langchain.tools import ToolRuntime, tool
 
 from voltgo.agent import memory
 from voltgo.agent.schemas import (
-    Category, ConfirmedPlan, DeleteResult, PreferenceRecord, ToolResult, tool_error,
+    Category, ConfirmedPlan, DeleteResult, ToolResult, tool_error,
 )
 from voltgo.clients import ClientError
 from voltgo.core import feasibility
@@ -23,7 +23,7 @@ from voltgo.core.place_policy import (
 from voltgo.core import time_budget
 from voltgo.core.time_budget import STALE_AFTER_SEC
 
-APPROVAL_TTL_SEC = 120   # 승인 화면을 띄운 뒤 2분 넘으면 무효 (설계서 3.3)
+APPROVAL_TTL_SEC = 120   # 승인 화면(save_preferences)을 띄운 뒤 2분 넘으면 그 승인은 무효 (설계서 3.3)
 CANDIDATE_TTL_SEC = 300  # 후보를 만든 지 5분 넘으면 데이터가 오래된 것
 
 
@@ -50,9 +50,10 @@ def get_charging_status(runtime: ToolRuntime, force_refresh: bool = False) -> di
     s = ctx.session
     now = ctx.clock()
 
-    # 60초 안이면 캐시 재사용
+    # 60초 안이면 캐시 재사용 (fetched_at 기준, 차량 전송 지연과 무관하게 우리가 조회한 시점으로 판단)
     if s.charging and not force_refresh:
-        age = (now - s.charging.observed_at).total_seconds()
+        freshness_ref = s.charging.fetched_at or s.charging.observed_at
+        age = (now - freshness_ref).total_seconds()
         if age <= STALE_AFTER_SEC:
             return ToolResult(status="ok", data=s.charging, source=s.charging.source,
                               observed_at=s.charging.observed_at, message="캐시(60초 이내)").dump()
@@ -75,17 +76,33 @@ def get_charging_status(runtime: ToolRuntime, force_refresh: bool = False) -> di
                       message=f"charging={snap.charging}, soc={snap.soc_pct}%, plug={snap.plug_type}").dump()
 
 
+def _apply_target_soc(charging, target_soc_pct: float):
+    """요청한 목표(target_soc_pct)와 차량이 실제로 설정한 목표(reported_target_soc_pct)가
+    다르면 방향에 따라 계산용 snapshot을 보정한다 (2.5.2, C028).
+    calculate_time_budget 과 confirm_plan 재검증이 같은 결과를 내도록 여기서만 처리한다.
+    사용자에게 보여줄 경고문은 assembler.collect_warnings 가 Session 값에서 별도로 다시 만든다.
+    """
+    api_target = charging.reported_target_soc_pct
+    if api_target is None or target_soc_pct == api_target:
+        return charging.model_copy(update={"target_soc_pct": target_soc_pct})
+    if target_soc_pct < api_target:
+        # 충전 경로상 반드시 지나가는 지점 -> 에너지 추정으로 전환 (remainTime 은 api_target 기준이라 못 믿는다)
+        return charging.model_copy(update={"target_soc_pct": target_soc_pct, "reported_remaining_sec": None})
+    # 차량이 api_target 에서 자동으로 멈춘다 -> 사용자 목표는 도달 불가, API 값 그대로 쓴다
+    return charging.model_copy(update={"target_soc_pct": api_target})
+
+
 # ---------------------------------------------------------------
 # 2. 시간 예산
 # ---------------------------------------------------------------
 @tool
-def calculate_time_budget(runtime: ToolRuntime, target_soc_pct: float = 80,
+def calculate_time_budget(runtime: ToolRuntime, target_soc_pct: Optional[float] = None,
                           user_limit_min: Optional[int] = None) -> dict:
     """검증된 충전 정보와 사용자의 시간 제한으로 복귀 마감 시각과 지금 남은 가용 시간(초)을 계산합니다.
     get_charging_status 다음에 호출합니다.
 
     Args:
-        target_soc_pct: 목표 충전량(%). 기본 80
+        target_soc_pct: 목표 충전량(%). 사용자가 말한 값. 없으면 차량 설정값을 쓰고, 그것도 없으면 질문합니다.
         user_limit_min: 사용자가 말한 시간 제한(분). "30분 있어" -> 30. 없으면 None
     """
     ctx = runtime.context
@@ -94,6 +111,14 @@ def calculate_time_budget(runtime: ToolRuntime, target_soc_pct: float = 80,
 
     if s.charging is None:
         return tool_error("PRECONDITION_FAILED", "get_charging_status 를 먼저 호출하세요")
+
+    api_target = s.charging.reported_target_soc_pct   # 차량이 실제로 설정한 목표 원문값 (API 미제공이면 None)
+
+    if target_soc_pct is None:
+        if api_target is None:
+            return tool_error("NEED_INPUT", "목표 충전량을 몇 %로 할지 사용자에게 물어보세요.")
+        target_soc_pct = api_target          # 사용자가 말 안 하면 차량 설정 그대로 쓴다
+
     if not (0 < target_soc_pct <= 100):
         return tool_error("NEED_INPUT", "목표 SoC 는 0~100 사이여야 합니다")
     if user_limit_min is not None and user_limit_min <= 0:
@@ -108,7 +133,8 @@ def calculate_time_budget(runtime: ToolRuntime, target_soc_pct: float = 80,
         s.user_limit_min = user_limit_min
         s.limit_said_at = now       # 제한을 말한 시각 기준으로 마감을 잡는다
 
-    snap = s.charging.model_copy(update={"target_soc_pct": target_soc_pct})
+    snap = _apply_target_soc(s.charging, target_soc_pct)
+
     # 같은 이름의 도구 함수와 겹치지 않게 모듈 경로로 부른다
     budget, err = time_budget.calculate_time_budget(snap, now, buffer_min=ctx.buffer_min,
                                                     user_limit_min=s.user_limit_min, limit_said_at=s.limit_said_at)
@@ -256,10 +282,23 @@ def get_walking_routes(runtime: ToolRuntime, poi_ids: list[str]) -> dict:
     unknown = [p for p in poi_ids if p not in s.places]
     if unknown:
         return tool_error("PRECONDITION_FAILED", f"등록되지 않은 poi_id: {unknown}")
+    poi_ids = list(dict.fromkeys(poi_ids))[:MAX_ROUTE_CANDIDATES]
+    if not poi_ids:
+        return tool_error("PRECONDITION_FAILED", "경로를 조회할 poi_id가 없습니다")
+
+    # 경로가 갱신되면 이전 경로로 만든 후보와 확정은 더 이상 유효하지 않다.
+    if s.candidates or s.confirmed or s.confirmed_by_plan:
+        s.bump_version()
+    s.candidates = {}
+    s.confirmed = None
+    s.confirmed_by_plan = {}
+    s.selected_ran = False
+
+    # 같은 ID를 중복 호출하지 않고, 이번 조회 결과만 다음 판정에 사용한다.
+    s.routes = {}
     if ctx.routes_client is None:
         return tool_error("AUTH_ERROR", "경로 API 설정이 없습니다")
 
-    poi_ids = poi_ids[:MAX_ROUTE_CANDIDATES]
     ok, failed = [], []
     for pid in poi_ids:
         try:
@@ -267,7 +306,7 @@ def get_walking_routes(runtime: ToolRuntime, poi_ids: list[str]) -> dict:
             s.routes[pid] = trip
             ok.append(trip)
         except ClientError as e:
-            failed.append(pid)               # 한 방향만 실패해도 후보 제외 (편도 x2 금지)
+            failed.append((pid, e))           # 한 방향만 실패해도 후보 제외 (편도 x2 금지)
             if e.code in ("AUTH_ERROR", "RATE_LIMIT"):
                 return tool_error(e.code, str(e), retryable=e.retryable)
         s.counters["api"] += 2
@@ -275,10 +314,14 @@ def get_walking_routes(runtime: ToolRuntime, poi_ids: list[str]) -> dict:
     if ok and ok[0].route_source == "mock":
         s.warnings.append("보행 경로는 Mock 데이터입니다")
     if failed:
-        s.warnings.append(f"경로 조회 실패로 제외된 후보: {', '.join(failed)}")
+        failed_ids = [pid for pid, _ in failed]
+        s.warnings.append(f"경로 조회 실패로 제외된 후보: {', '.join(failed_ids)}")
 
     if not ok:
-        return tool_error("ROUTE_PARSE", "모든 후보의 경로 조회에 실패했습니다")
+        # 앞선 후보가 파싱 실패여도 다른 후보의 일시 오류를 보존해 middleware가 재시도하게 한다.
+        error = next((e for _, e in failed if e.retryable), failed[0][1])
+        return tool_error(error.code, "모든 후보의 경로 조회에 실패했습니다",
+                          retryable=error.retryable)
     status = "partial" if failed else "ok"
     return ToolResult(status=status, data=ok, source=ok[0].route_source,
                       message=f"성공 {len(ok)}개, 실패 {len(failed)}개").dump()
@@ -339,12 +382,12 @@ def select_feasible_plans(runtime: ToolRuntime, dwell_min: Optional[int] = None,
 
 
 # ---------------------------------------------------------------
-# 6. 계획 확정 (HITL 승인 뒤에만 실행된다)
+# 6. 계획 확정 (승인 화면 없이, 현재 시각·최신 상태로 재검증한 뒤 실행된다)
 # ---------------------------------------------------------------
 @tool
 def confirm_plan(runtime: ToolRuntime, plan_id: str, version: int) -> dict:
-    """사용자가 선택한 계획을 승인 뒤 다시 검증해서 현재 대화의 확정 계획으로 기록합니다.
-    사용자가 후보를 골랐을 때만 호출합니다.
+    """사용자가 선택한 계획을 현재 시각과 최신 충전 상태로 다시 검증해서 현재 대화의 확정 계획으로 기록합니다.
+    사용자가 후보를 골랐을 때만 호출합니다. 별도 승인 절차는 없습니다.
 
     Args:
         plan_id: 선택한 후보의 plan_id
@@ -354,7 +397,7 @@ def confirm_plan(runtime: ToolRuntime, plan_id: str, version: int) -> dict:
     s = ctx.session
     now = ctx.clock()
 
-    # 같은 계획의 중복 확정 방지. request_id 재전송(C017)은 실행 래퍼에서 처리한다.
+    # 같은 계획의 중복 확정 방지. 선호 승인 request_id 재전송은 실행 래퍼에서 처리한다.
     key = f"{plan_id}:{version}"
     if key in s.confirmed_by_plan:
         return ToolResult(status="ok", data=s.confirmed_by_plan[key], message="이미 확정된 계획").dump()
@@ -364,12 +407,7 @@ def confirm_plan(runtime: ToolRuntime, plan_id: str, version: int) -> dict:
         return tool_error("PRECONDITION_FAILED", "통과한 후보에 없는 plan_id 입니다")
     if plan.version != s.condition_version or version != plan.version:
         return tool_error("VERSION_MISMATCH", "조건이 바뀌었습니다. 다시 선별하세요.")
-    # 두 가지는 다른 검사다.
-    #   승인 대기  : 승인 화면을 띄운 뒤 사용자가 오래 답이 없었는지
-    #   후보 신선도: 후보를 만든 뒤 시간이 많이 흘렀는지
-    requested_at = s.approval_requested_at
-    if requested_at is not None and (now - requested_at).total_seconds() > APPROVAL_TTL_SEC:
-        return tool_error("APPROVAL_EXPIRED", "승인 대기가 2분을 넘었습니다. 다시 선별하세요.")
+    # 후보 신선도: 후보를 만든 뒤 시간이 많이 흘렀으면 그 후보로 확정하지 않는다
     if (now - plan.evaluated_at).total_seconds() > CANDIDATE_TTL_SEC:
         return tool_error("STALE_CANDIDATE", "후보를 만든 지 오래됐습니다. 다시 선별하세요.")
 
@@ -378,17 +416,8 @@ def confirm_plan(runtime: ToolRuntime, plan_id: str, version: int) -> dict:
         snap = _fetch_charging(ctx) if ctx.charging_provider else s.charging
     except ClientError as e:
         return tool_error(e.code, str(e), retryable=e.retryable)
-    # 추천 단계와 같은 목표 규칙을 재검증에도 적용한다. 원문 잔여시간은 '차량이 설정한 목표' 기준이라
-    # 사용자 목표가 그보다 낮으면 못 쓰고(추정으로), 높으면 차량 목표에서 충전이 멈춘다.
-    update = {"target_soc_pct": s.target_soc_pct}
-    api_target = getattr(snap, "reported_target_soc_pct", None)
-    if api_target is not None:
-        if s.target_soc_pct < api_target:
-            update["reported_remaining_sec"] = None
-        elif s.target_soc_pct > api_target:
-            update["target_soc_pct"] = api_target
     budget, err = time_budget.calculate_time_budget(
-        snap.model_copy(update=update), now,
+        _apply_target_soc(snap, s.target_soc_pct), now,
         buffer_min=ctx.buffer_min, user_limit_min=s.user_limit_min, limit_said_at=s.limit_said_at)
     if err is not None:
         return tool_error(err, "재검증 실패. 다시 계획하세요.")
@@ -403,7 +432,6 @@ def confirm_plan(runtime: ToolRuntime, plan_id: str, version: int) -> dict:
                               return_at=rechecked.return_at, leave_by=rechecked.leave_by)
     s.confirmed = confirmed
     s.confirmed_by_plan[key] = confirmed
-    s.approval_requested_at = None      # 다음 승인은 새로 잰다
     s.candidates[plan_id] = rechecked
     return ToolResult(status="ok", data=confirmed, observed_at=now,
                       message=f"확정. 늦어도 {confirmed.leave_by:%H:%M} 에는 장소에서 출발").dump()
@@ -422,23 +450,24 @@ def save_preferences(runtime: ToolRuntime, category: Optional[Category] = None,
         dwell_min: 기본 체류 시간(분), 5~60
     """
     ctx = runtime.context
+    s = ctx.session
+    now = ctx.clock()
     if category is None and dwell_min is None:
         return tool_error("NEED_INPUT", "저장할 항목이 없습니다")
     if dwell_min is not None and not (5 <= dwell_min <= 60):
         return tool_error("NEED_INPUT", "체류 시간은 5~60분")
+    # 승인 만료: 승인 화면을 띄운 뒤(approval_requested_at) 2분 넘게 답이 없었으면 그 승인은 무효 (설계서 3.3)
+    requested_at = s.approval_requested_at
+    if requested_at is not None and (now - requested_at).total_seconds() > APPROVAL_TTL_SEC:
+        return tool_error("APPROVAL_EXPIRED", "승인 대기가 2분을 넘었습니다. 저장하려면 다시 요청해 주세요.")
 
-    old = memory.load_preferences(ctx.user_id)
-    record = PreferenceRecord(
-        user_id=ctx.user_id,
-        preferred_category=category if category is not None else (old.preferred_category if old else None),
-        dwell_min=dwell_min if dwell_min is not None else (old.dwell_min if old else None),
-        consent_at=ctx.clock(),
-    )
     try:
-        memory.save_preferences(record)
+        record = memory.update_preferences(ctx.user_id, category=category,
+                                           dwell_min=dwell_min, consent_at=now)
     except OSError as e:
         # 실패했으면 기억했다고 말하면 안 된다
         return tool_error("STORE_ERROR", f"저장 실패: {type(e).__name__}")
+    # 같은 승인 묶음의 다른 저장도 동일한 만료 기준을 쓴다. 정리는 decide()가 맡는다.
     return ToolResult(status="ok", data=record, message="저장 완료").dump()
 
 

@@ -4,6 +4,8 @@ from datetime import timedelta
 from types import SimpleNamespace
 
 from voltgo.agent import tools
+from voltgo.agent.schemas import RoundTrip
+from voltgo.clients import ClientError
 
 
 def rt(context):
@@ -37,14 +39,14 @@ def test_c001_happy_path_and_confirm(context):
     r = tools.select_feasible_plans.func(rt(context), dwell_min=12)
     assert [p["plan_id"] for p in r["data"]] == ["A", "B"]
 
-    # 확정 (승인은 미들웨어가 했다고 가정)
+    # 선택한 계획을 추가 승인 없이 재검증 후 확정
     version = s.candidates["A"].version
     r = tools.confirm_plan.func(rt(context), plan_id="A", version=version)
     assert r["status"] == "ok"
     assert s.confirmed.plan_id == "A"
     assert s.confirmed.leave_by == s.time_budget.return_deadline - timedelta(minutes=5)
 
-    # C017 같은 요청 재전송 -> 새 기록 없이 이전 결과
+    # 같은 plan_id/version 재확정 -> 새 기록 없이 이전 결과
     again = tools.confirm_plan.func(rt(context), plan_id="A", version=version)
     assert again["message"] == "이미 확정된 계획"
 
@@ -85,6 +87,70 @@ def test_unknown_poi_rejected(context):
     assert r["error_code"] == "PRECONDITION_FAILED"
 
 
+def _prepare_candidate(context):
+    tools.get_charging_status.func(rt(context))
+    tools.calculate_time_budget.func(rt(context), user_limit_min=30)
+    tools.search_nearby_places.func(rt(context), category="meal")
+    tools.get_walking_routes.func(rt(context), poi_ids=["A"])
+    tools.select_feasible_plans.func(rt(context), dwell_min=12)
+    return context.session.candidates["A"]
+
+
+def test_route_refresh_failure_invalidates_previous_candidate(context):
+    old_plan = _prepare_candidate(context)
+
+    class FailingRoutes:
+        def round_trip(self, origin, place):
+            raise ClientError("ROUTE_PARSE", "복귀 경로 없음")
+
+    context.routes_client = FailingRoutes()
+    result = tools.get_walking_routes.func(rt(context), poi_ids=["A"])
+
+    assert result["status"] == "error"
+    assert context.session.routes == {}
+    assert context.session.candidates == {}
+    assert context.session.selected_ran is False
+    assert context.session.condition_version == old_plan.version + 1
+    assert tools.confirm_plan.func(rt(context), plan_id="A", version=old_plan.version)["status"] == "error"
+
+
+def test_longer_refreshed_route_requires_reselection(context):
+    old_plan = _prepare_candidate(context)
+
+    class SlowRoutes:
+        def round_trip(self, origin, place):
+            return RoundTrip(
+                poi_id=place.poi_id,
+                outbound_sec=1800,
+                inbound_sec=1800,
+                route_source="mock",
+            )
+
+    context.routes_client = SlowRoutes()
+    assert tools.get_walking_routes.func(rt(context), poi_ids=["A"])["status"] == "ok"
+    assert context.session.candidates == {}
+    assert tools.confirm_plan.func(rt(context), plan_id="A", version=old_plan.version)["status"] == "error"
+
+    selected = tools.select_feasible_plans.func(rt(context), dwell_min=12)
+    assert selected["data"] == []
+    assert context.session.candidates == {}
+
+
+def test_route_refresh_invalidates_confirmed_plan(context):
+    plan = _prepare_candidate(context)
+    assert tools.confirm_plan.func(rt(context), plan_id="A", version=plan.version)["status"] == "ok"
+    assert context.session.confirmed is not None
+    assert context.session.confirmed_by_plan
+
+    result = tools.get_walking_routes.func(rt(context), poi_ids=["A"])
+
+    assert result["status"] == "ok"
+    assert context.session.confirmed is None
+    assert context.session.confirmed_by_plan == {}
+    assert context.session.candidates == {}
+    assert context.session.condition_version == plan.version + 1
+
+
 def test_preferences_save_and_isolation(context):
     from voltgo.agent import memory
     r = tools.save_preferences.func(rt(context), category="cafe")
@@ -93,3 +159,24 @@ def test_preferences_save_and_isolation(context):
     assert memory.load_preferences("u2") is None            # C015 다른 사용자 격리
     assert tools.delete_preferences.func(rt(context))["data"]["deleted"] is True
     assert memory.load_preferences("u1") is None
+
+
+def test_c028_target_mismatch_deadline_survives_confirm(context):
+    # 차량 설정 목표(80%, mock) > 사용자 목표(60%) -> 에너지 추정으로 전환.
+    # confirm_plan 재검증에서도 같은 기준(에너지 추정)이 유지되고 마감이 그대로여야 한다.
+    s = context.session
+    tools.get_charging_status.func(rt(context))
+    tools.calculate_time_budget.func(rt(context), target_soc_pct=60)
+    assert s.time_budget.estimate_basis == "energy_power"
+    recommended_deadline = s.time_budget.return_deadline
+
+    tools.search_nearby_places.func(rt(context), category="meal")
+    tools.get_walking_routes.func(rt(context), poi_ids=["A", "B", "C"])
+    tools.select_feasible_plans.func(rt(context), dwell_min=1)
+    assert set(s.candidates) == {"A", "B"}
+
+    version = s.candidates["A"].version
+    r = tools.confirm_plan.func(rt(context), plan_id="A", version=version)
+    assert r["status"] == "ok"
+    assert s.time_budget.estimate_basis == "energy_power"
+    assert s.time_budget.return_deadline == recommended_deadline
