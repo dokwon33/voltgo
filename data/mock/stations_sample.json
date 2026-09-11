@@ -1,0 +1,29 @@
+{
+  "searchPoiInfo": {
+    "totalCount": "4", "count": "4", "page": "1",
+    "pois": {
+      "poi": [
+        {"id": "S1", "pkey": "9001", "navSeq": "1", "name": "역삼역 EV충전소",
+         "frontLat": "37.50060", "frontLon": "127.03660", "noorLat": "37.50062", "noorLon": "127.03662",
+         "upperAddrName": "서울", "middleAddrName": "강남구", "lowerAddrName": "역삼동", "detailAddrName": "",
+         "firstNo": "825", "secondNo": "0",
+         "upperBizName": "교통편의", "middleBizName": "주유소/충전소", "lowerBizName": "전기차충전소"},
+        {"id": "S2", "pkey": "9002", "navSeq": "1", "name": "역삼역 EV충전소 2주차장",
+         "frontLat": "37.50110", "frontLon": "127.03590", "noorLat": "37.50112", "noorLon": "127.03592",
+         "upperAddrName": "서울", "middleAddrName": "강남구", "lowerAddrName": "역삼동", "detailAddrName": "",
+         "firstNo": "826", "secondNo": "12",
+         "upperBizName": "교통편의", "middleBizName": "주유소/충전소", "lowerBizName": "전기차충전소"},
+        {"id": "S3", "pkey": "9003", "navSeq": "1", "name": "강남역 EV충전소",
+         "frontLat": "37.49790", "frontLon": "127.02760", "noorLat": "37.49792", "noorLon": "127.02762",
+         "upperAddrName": "서울", "middleAddrName": "강남구", "lowerAddrName": "역삼동", "detailAddrName": "",
+         "firstNo": "858", "secondNo": "0",
+         "upperBizName": "교통편의", "middleBizName": "주유소/충전소", "lowerBizName": "전기차충전소"},
+        {"id": "S4", "pkey": "9004", "navSeq": "1", "name": "선릉역 EV충전소 (입구 좌표 오류 샘플)",
+         "frontLat": "0", "frontLon": "0", "noorLat": "37.50450", "noorLon": "127.04890",
+         "upperAddrName": "서울", "middleAddrName": "강남구", "lowerAddrName": "대치동", "detailAddrName": "",
+         "firstNo": "0", "secondNo": "0",
+         "upperBizName": "교통편의", "middleBizName": "주유소/충전소", "lowerBizName": "전기차충전소"}
+      ]
+    }
+  }
+}

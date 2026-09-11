@@ -17,7 +17,9 @@ from voltgo.agent.schemas import (
 )
 from voltgo.clients import ClientError
 from voltgo.core import feasibility
-from voltgo.core.place_policy import DWELL_DEFAULT_MIN, MAX_ROUTE_CANDIDATES, filter_places
+from voltgo.core.place_policy import (
+    DEFAULT_DIST_M, DWELL_DEFAULT_MIN, MAX_DIST_M, MAX_ROUTE_CANDIDATES, filter_places,
+)
 from voltgo.core import time_budget
 from voltgo.core.time_budget import STALE_AFTER_SEC
 
@@ -130,41 +132,72 @@ def calculate_time_budget(runtime: ToolRuntime, target_soc_pct: float = 80,
 # ---------------------------------------------------------------
 # 3. 장소 검색
 # ---------------------------------------------------------------
+def _set_origin(s, station):
+    """출발지를 정한다. 다른 곳으로 바뀌면 이전 장소/경로/후보/승인은 버린다"""
+    changed = s.origin is not None and (s.origin.latitude, s.origin.longitude) != (station.latitude, station.longitude)
+    if changed:
+        if s.candidates or s.confirmed:
+            s.bump_version()
+        s.places, s.routes, s.selected_ran = {}, {}, False
+    s.origin = station
+    s.station_candidates = {}
+
+
 @tool
-def find_station(runtime: ToolRuntime, keyword: str) -> dict:
+def find_station(runtime: ToolRuntime, keyword: str, station_id: Optional[str] = None) -> dict:
     """충전소 이름으로 출발지 좌표를 찾습니다. 위치 정보가 없을 때 사용자가 말한 충전소명으로 호출합니다.
+    후보가 여러 개면 이름·주소 목록을 돌려주므로 사용자에게 고르게 한 뒤,
+    고른 후보의 poi_id 를 station_id 로 넣어 다시 호출합니다. (이때는 API 를 다시 부르지 않습니다)
 
     Args:
         keyword: 충전소 이름 (예: "역삼역 EV충전소")
+        station_id: 직전 결과 후보 중 사용자가 고른 poi_id. 처음 검색할 때는 비워 둡니다
     """
     ctx = runtime.context
+    s = ctx.session
+
+    if station_id is not None:
+        picked = s.station_candidates.get(station_id)
+        if picked is None:
+            return tool_error("PRECONDITION_FAILED", "직전 검색 후보에 없는 station_id 입니다. 먼저 keyword 로 검색하세요.")
+        _set_origin(s, picked)
+        return ToolResult(status="ok", data=picked, source=picked.source, message=f"출발지 설정: {picked.name}").dump()
+
+    # 새 검색을 시작하면 이전 후보는 무효. 결과 없음·API 오류로 끝나도 옛 station_id 가 선택되면 안 된다
+    s.station_candidates = {}
+
+    if not keyword.strip():
+        return tool_error("NEED_INPUT", "충전소 이름이 비어 있습니다. 사용자에게 충전소 이름을 물어보세요.")
     if ctx.places_client is None:
         return tool_error("AUTH_ERROR", "장소 API 설정이 없습니다")
     try:
         found = ctx.places_client.find_station(keyword)
     except ClientError as e:
         return tool_error(e.code, str(e), retryable=e.retryable)
-    ctx.session.counters["api"] += 1
+    s.counters["api"] += 1
 
     if not found:
         return tool_error("NEED_INPUT", "충전소를 찾지 못했습니다. 이름을 다시 알려달라고 하세요.")
     if len(found) >= 2:
-        names = ", ".join(o.name for o in found[:5])
-        return tool_error("NEED_INPUT", f"후보가 여러 개입니다: {names}. 어느 곳인지 물어보세요.")
+        # 선택 전에는 Origin 을 확정하지 않는다 (설계서 2.5 find_station)
+        s.station_candidates = {c.poi_id: c for c in found}
+        lines = " / ".join(f"{c.poi_id}: {c.name} ({c.address})" for c in found)
+        return ToolResult(status="partial", data=found, error_code="NEED_INPUT", source=found[0].source,
+                          message=f"후보 {len(found)}곳: {lines}. 어느 곳인지 물어본 뒤 station_id 로 다시 호출하세요.").dump()
 
-    ctx.session.origin = found[0]
-    return ToolResult(status="ok", data=found[0], source=found[0].source, message="출발지 설정").dump()
+    _set_origin(s, found[0])
+    return ToolResult(status="ok", data=found[0], source=found[0].source, message=f"출발지 설정: {found[0].name}").dump()
 
 
 @tool
 def search_nearby_places(runtime: ToolRuntime, category: Category,
-                         radius_km: int = 1, max_dist_m: int = 500) -> dict:
+                         radius_km: int = 1, max_dist_m: int = DEFAULT_DIST_M) -> dict:
     """충전소 주변에서 사용자가 원하는 종류의 장소를 찾습니다. calculate_time_budget 이 성공한 뒤 호출합니다.
 
     Args:
         category: meal(식사) / cafe / convenience(편의점) / mart
         radius_km: TMAP 검색 반경(km, 정수). 기본 1
-        max_dist_m: 직선거리 필터(m). 기본 500. 결과가 없을 때만 1회 늘려서 재검색
+        max_dist_m: 직선거리 필터(m). 기본 500. 결과가 없을 때만 1회 최대 1000 까지 늘려서 재검색
     """
     ctx = runtime.context
     s = ctx.session
@@ -177,6 +210,8 @@ def search_nearby_places(runtime: ToolRuntime, category: Category,
         return tool_error("AUTH_ERROR", "장소 API 설정이 없습니다")
     if not (1 <= radius_km <= 3):
         return tool_error("NEED_INPUT", "radius_km 는 1~3 사이")
+    if not (1 <= max_dist_m <= MAX_DIST_M):
+        return tool_error("NEED_INPUT", f"max_dist_m 는 1~{MAX_DIST_M} 사이")
 
     try:
         places = ctx.places_client.search_around(s.origin, category, radius_km=radius_km)

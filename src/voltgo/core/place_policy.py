@@ -22,6 +22,8 @@ DWELL_DEFAULT_MIN = {
 }
 
 MAX_ROUTE_CANDIDATES = 5   # 경로 조회는 최대 5개까지만 (호출 상한)
+DEFAULT_DIST_M = 500       # 기본 도보 반경 (편도 약 6~7분)
+MAX_DIST_M = 1000          # 결과가 없을 때 1회 재검색으로 넓힐 수 있는 상한 (설계서 2.5.1)
 
 
 def haversine_m(lat1, lon1, lat2, lon2) -> int:

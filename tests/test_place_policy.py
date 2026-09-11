@@ -18,6 +18,12 @@ def test_filter_drops_600m_and_dedupes(origin):
     assert [p.poi_id for p in picked] == ["A", "B"]
 
 
+def test_filter_500m_boundary(origin):
+    # 500m 는 포함, 501m 는 제외
+    places = [_place("in", 500), _place("out", 501), _place("near", 499)]
+    assert [p.poi_id for p in filter_places(places, origin, max_dist_m=500)] == ["near", "in"]
+
+
 def test_filter_limit_5(origin):
     places = [_place(str(i), i * 10) for i in range(10)]
     assert len(filter_places(places, origin, max_dist_m=500)) == 5
