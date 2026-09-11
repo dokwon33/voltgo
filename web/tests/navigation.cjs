@@ -14,6 +14,7 @@ const root = path.resolve(__dirname, '..');
   const candidates = [candidate('A'),candidate('B')];
   let pending = null, nextApproval = false, release = null, delay = false, decisions = 0;
   const session = {now,condition_version:1,candidates,charging:{charging:true,soc_pct:40,target_soc_pct:80,observed_at:now,reported_remaining_sec:2400}};
+  let threadCount = 0;
   await page.route('**/*', async route => {
    const url = new URL(route.request().url());
    if (url.hostname !== 'voltgo.test') return route.abort();
@@ -23,12 +24,13 @@ const root = path.resolve(__dirname, '..');
     if (url.pathname === '/api/ask') {
      if (delay) await new Promise(resolve=>{release=resolve;});
      if (nextApproval) {
-      pending={request_id:'request-1',expires_at:'2026-09-11T14:02:00+09:00',actions:[{name:'save_preferences',args:{category:'cafe'}}]};
+      pending={approval_id:'request-1',expires_at:'2026-09-11T14:02:00+09:00',actions:[{name:'save_preferences',args:{category:'cafe'}}]};
       response={status:'awaiting_approval',message:'선호를 저장할까요?',candidates:[]}; nextApproval=false;
      } else response={status:'ok',message:'추천했어요.',candidates};
     }
     if (url.pathname === '/api/decide') { decisions++;pending=null;response={status:'ok',message:'처리했어요.',candidates:[]}; }
-    return route.fulfill({json:{session,instance_id:'server',exists:true,response,pending_approval:pending}});
+    const thread_id = url.pathname === '/api/session' && route.request().method() === 'POST' ? 'nav-' + (++threadCount) : undefined;
+    return route.fulfill({json:{session,thread_id,instance_id:'server',exists:true,response,pending_approval:pending}});
    }
    const file = url.pathname === '/' ? '/index.html' : url.pathname;
    return route.fulfill({contentType:{'.html':'text/html','.js':'application/javascript','.css':'text/css','.png':'image/png','.woff2':'font/woff2'}[path.extname(file)],body:await fs.readFile(root+file)});
@@ -99,7 +101,7 @@ const root = path.resolve(__dirname, '..');
   await page.goForward();await view('home');assert.equal(await page.locator('#approval').isVisible(),false);
   // New conversation starts a fresh navigation scope, independent of older thread entries.
   await page.locator('#home .history-open').click();await page.locator('#newConversation').click();await view('home');
-  const newId=await page.evaluate(()=>threadId);assert.notEqual(newId,initialId);
+  await page.waitForFunction(()=>!!threadId);const newId=await page.evaluate(()=>threadId);assert.notEqual(newId,initialId);
   await back('home');assert.equal(await page.evaluate(()=>threadId),newId);
   assert.deepEqual(errors,[]);
   console.log('PASS: clickable logo/no reset, repeat home, home-map back, map selection, dialog close/Esc/back/forward, no duplicate submit history, restored root back, late reply, approval dismissal/review, new-thread scope.');

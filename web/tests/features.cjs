@@ -14,20 +14,22 @@ const root = path.resolve(__dirname, '..');
     const now = '2026-09-11T10:48:00+09:00';
     const candidate = { plan_id: 'A', poi_id: 'A', version: 1, name: '잠깐의 커피', category: 'cafe', outbound_sec: 240, inbound_sec: 300, dwell_sec: 900, total_sec: 1440, slack_sec: 660, return_at: '2026-09-11T11:12:00+09:00', leave_by: '2026-09-11T10:59:00+09:00', evaluated_at: now, route_summary: '왕복 650m · 조용한 골목길', poi_source: 'mock', route_source: 'mock', opening_status: 'unknown' };
     let session = {now, user_id: 'test', condition_version: 1, origin: '역삼역 EV충전소', candidates: [], charging: { soc_pct: 68, charging: true, plug_type: 'fast', target_soc_pct: 80, reported_target_soc_pct: 80, observed_at: now, source: 'mock', reported_remaining_sec: 2400 }, effective_target_soc_pct: 80, home_budget: { finish_at: '2026-09-11T11:28:00+09:00', estimate_basis: 'reported_remaining' }};
-    const envelope = response => ({session, instance_id: instance, pending_approval: pending, response, exists: true, map_data: { origin: {name: '역삼역 EV충전소', latitude: 37.5, longitude: 127.03}, places: [{poi_id: 'A', name: '잠깐의 커피', latitude: 37.501, longitude: 127.032}], routes: [] }});
+    let threadCount = 0;
+    const envelope = response => ({session, thread_id: 'features-' + threadCount, instance_id: instance, pending_approval: pending, response, exists: true, map_data: { origin: {name: '역삼역 EV충전소', latitude: 37.5, longitude: 127.03}, places: [{poi_id: 'A', name: '잠깐의 커피', latitude: 37.501, longitude: 127.032}], routes: [] }});
     await page.route('**/*', async route => {
       const u = new URL(route.request().url());
       if (u.hostname !== 'voltgo.test') return route.abort();
       if (u.pathname === '/api/health') return route.fulfill({json: {clock: 'fixed', user_id: 'test', instance_id: instance, charging: 'mock', tmap: 'mock'}});
       if (u.pathname.startsWith('/api/')) {
         const body = route.request().postDataJSON(); requests.push({path: u.pathname, body});
+        if (u.pathname === '/api/session' && route.request().method() === 'POST') threadCount++;
         let response = null;
         if (u.pathname === '/api/ask') {
           response = nextResponse || {status: 'ok', message: '잠깐 쉬어가기 좋은 곳을 찾았어요.', candidates: [{...candidate, version: session.condition_version}], warnings: []};
           nextResponse = null;
           session.candidates = response.candidates || [];
         }
-        if (u.pathname === '/api/refresh') { session.condition_version += 1; session.candidates = []; }
+        if (u.pathname === '/api/charging/refresh') { session.condition_version += 1; session.candidates = []; }
         if (u.pathname === '/api/decide') { pending = null; session.preferences = {preferred_category: 'cafe', dwell_min: 15}; response = {status: 'ok', message: '취향을 기억했어요.', candidates: []}; }
         return route.fulfill({json: envelope(response)});
       }
@@ -77,12 +79,12 @@ const root = path.resolve(__dirname, '..');
     assert.equal(requests.at(-1).body.selection.id, 'S1');
     session.station_candidates = [];
     await page.locator('#preferencesBtn').click(); await page.locator('[name=category]').selectOption('cafe'); await page.locator('[name=dwell]').fill('15');
-    pending = {request_id: 'approval-one', expires_at: '2026-09-11T10:50:00+09:00', actions: [{name: 'save_preferences', args: {category: 'cafe', dwell_min: 15}}]};
+    pending = {approval_id: 'approval-one', expires_at: '2026-09-11T10:50:00+09:00', actions: [{name: 'save_preferences', args: {category: 'cafe', dwell_min: 15}}]};
     nextResponse = {status: 'awaiting_approval', message: '선호를 저장할까요?', candidates: []};
     await page.locator('#preferenceForm button').click(); await page.waitForFunction(() => !busy && !document.querySelector('#approval').hidden);
     assert.match(await page.locator('#apBody').innerText(), /카페 · 머무는 시간 15분/);
     await page.locator('#approve').click(); await page.waitForFunction(() => !busy);
-    assert.equal(requests.at(-1).body.request_id, 'approval-one');
+    assert.equal(requests.at(-1).body.approval_id, 'approval-one');
     await page.locator('#chat .history-open').click(); assert.equal(await page.locator('.history-item').count(), 1);
     await page.screenshot({path: '/tmp/voltgo-front-history.png', fullPage: true});
     await page.locator('#newConversation').click(); await page.waitForFunction(() => !document.querySelector('#home').hidden);

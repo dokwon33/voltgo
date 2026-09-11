@@ -24,11 +24,56 @@
   let threadId = '', busy = false, health = {}, session = {}, lastRes = null;
 
   async function api(path, body) {
-    const opt = body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : undefined;
+    // 사용자는 서버가 발급한 HttpOnly 쿠키로만 구분한다. 화면은 user_id 를 보내지 않는다.
+    const opt = body ? { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+                     : { credentials: 'same-origin', cache: 'no-store' };
     const r = await fetch(path, opt);
     const data = await r.json().catch(() => ({ error: '서버 응답을 읽지 못했어요' }));
-    if (!r.ok || data.error) throw new Error(data.error || ('HTTP ' + r.status));
+    if (!r.ok || data.error) {
+      const error = new Error(data.error || ('HTTP ' + r.status));
+      error.status = r.status;
+      if (r.status === 401) sessionExpired();
+      throw error;
+    }
     return data;
+  }
+
+  // ---------- 대화 ID : 서버가 발급한다 ----------
+  let threadPromise = null, threadRevision = 0;
+  function bindThread(id) {
+    threadId = id;
+    if (history.state?.scope === navigationScope) history.replaceState({...history.state, voltgo: id}, '');
+  }
+  function startThread() {
+    const revision = ++threadRevision;
+    threadId = '';
+    threadPromise = api('/api/session', {}).then((d) => {
+      if (revision !== threadRevision) return null;        // 그사이 다른 대화로 넘어갔다
+      if (!d.thread_id) throw new Error('새 대화를 준비하지 못했어요');
+      bindThread(d.thread_id);
+      if (!timeline.length) { acceptEnvelope(d); renderCar(session); }
+      return d.thread_id;
+    });
+    threadPromise.catch(() => {
+      if (revision !== threadRevision || timeline.length) return;
+      $('#carMain').textContent = '서버에 연결하지 못했어요'; $('#carSub').textContent = '터미널에서 python scripts/web.py 를 켜고 새로고침해 주세요'; $('#carTimes').hidden = true;
+    });
+    return threadPromise;
+  }
+  async function ensureThread() {
+    if (threadId) return threadId;
+    const id = await (threadPromise || startThread());
+    if (!id) throw new Error('새 대화를 준비하지 못했어요. 다시 시도해 주세요.');
+    return id;
+  }
+  function forgetPendingThread() { threadRevision++; threadPromise = null; }
+  let expiredOnce = false;
+  function sessionExpired() {
+    if (expiredOnce) return;
+    expiredOnce = true;
+    notifyUser('접속 세션이 만료되어 새로 시작해요.');
+    api('/api/health').then(h => { health = h; loadConversations(); }).catch(() => {})
+      .finally(() => { expiredOnce = false; busy = false; goHome(); });
   }
 
   // ---------- 홈 카드 ----------
@@ -268,7 +313,7 @@
   // Navigation entries keep the background of a dialog as well as the selected map.
   let navigationScope = '', backInFlight = null, finishBack = null;
   const overlayViews = new Set(['car', 'panel', 'info', 'approval']);
-  function sameScope(state) { return state?.scope === navigationScope && state?.voltgo === threadId; }
+  function sameScope(state) { return Boolean(navigationScope) && state?.scope === navigationScope; }
   function backgroundView(state = history.state) {
     if (!sameScope(state)) return {view: 'home', mapKey: null};
     return overlayViews.has(state.view) ? state.background : {view: state.view, mapKey: state.mapKey};
@@ -394,7 +439,7 @@
     showChat(); addMe(text); $('#input').value = '';
     busy = true; setLock(); setMood('busy'); addTyping();
     try {
-      const d = await api('/api/ask', { thread_id: threadId, instance_id: serverInstance, text, selection });
+      const d = await api('/api/ask', { thread_id: await ensureThread(), text, selection });
       acceptEnvelope(d); lastRes = d.response; renderCar(session);
       removeTyping(); renderStrip(session, d.response); addBot(d.response, d.map_data);
     } catch (e) { removeTyping(); addError(e.message); }
@@ -410,7 +455,7 @@
     addMe(label);
     busy = true; setLock(); setMood('busy'); addTyping();
     try {
-      const d = await api('/api/decide', { thread_id: threadId, instance_id: serverInstance, decision, request_id: pendingApproval?.request_id || lastRes?.request_id });
+      const d = await api('/api/decide', { thread_id: threadId, decision, approval_id: pendingApproval?.approval_id });
       acceptEnvelope(d); lastRes = d.response; renderCar(session);
       removeTyping(); renderStrip(session, d.response); addBot(d.response, d.map_data);
     } catch (e) { removeTyping(); addError(e.message); if (pendingApproval) openApproval(lastRes || {}); }
@@ -423,7 +468,6 @@
     $('#archiveNote').hidden = true; $('#stationOptions').hidden = true; $('#conditionSummary').hidden = true;
     if ($('#carDialog').open) $('#carDialog').close();
     routeMap.reset();
-    threadId = 'web-' + crypto.randomUUID();
     session = {}; lastRes = null;
     currentMapData = {};
     setMood('idle');
@@ -432,11 +476,8 @@
     $('#messages').innerHTML = ''; $('#follow').innerHTML = ''; $('#strip').hidden = true;
     $('#approval').hidden = true; $('#chat').hidden = true; $('#home').hidden = false;
     busy = false; setLock();
+    startThread();        // 첫 질문 전이면 받은 Session 으로 홈 카드를 채운다
     resetNavigation('home');
-    if (!loadSession) return; // 첫 질문의 응답에서 새 세션 정보를 받는다.
-    const requestedThread = threadId;
-    api('/api/session?thread_id=' + encodeURIComponent(threadId)).then((d) => { if (requestedThread !== threadId || timeline.length) return; acceptEnvelope(d); renderCar(session); })
-      .catch(() => { if (requestedThread !== threadId || timeline.length) return; $('#carMain').textContent = '서버가 꺼져 있어요'; $('#carSub').textContent = '터미널에서 python scripts/web.py 를 켜고 새로고침해 주세요'; $('#carTimes').hidden = true; });
   }
 
   $('#composer').addEventListener('submit', (e) => { e.preventDefault(); send($('#input').value); });

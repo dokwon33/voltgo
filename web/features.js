@@ -164,9 +164,11 @@ async function restoreConversation(id) {
   const record = conversations.find(r => r.id === id); if (!record) return;
   saveConversation(); busy = true; setLock(); await closeFeature();
   let live = null;
-  try { live = await api('/api/session?existing=1&thread_id=' + encodeURIComponent(id)); }
-  catch { notifyUser('서버에 연결하지 못해 보관된 내용만 보여드려요.'); }
-  threadId = id; archived = !live?.exists || live.instance_id !== record.instance_id;
+  // 서버에 없는 대화(재시작·다른 사용자)는 404 로 온다. 이때는 보관된 기록만 보여준다.
+  try { live = await api('/api/session?thread_id=' + encodeURIComponent(id)); }
+  catch (error) { if (error.status !== 404) notifyUser('서버에 연결하지 못해 보관된 내용만 보여드려요.'); }
+  forgetPendingThread();
+  threadId = id; archived = !live || live.instance_id !== record.instance_id;
   timeline = record.turns; session = record.session || {}; lastRes = record.response;
   currentMapData = {};
   serverInstance = record.instance_id; pendingApproval = null; receivedAt = Date.now();
@@ -185,7 +187,7 @@ async function refreshVehicle() {
   if (busy || archived || !$('#approval').hidden) return;
   busy = true; setLock(); $('#refreshStatus').textContent = '차량 정보를 다시 확인하고 있어요…';
   try {
-    const data = await api('/api/refresh', {thread_id: threadId, instance_id: serverInstance});
+    const data = await api('/api/charging/refresh', {thread_id: await ensureThread()});
     acceptEnvelope(data); renderCar(session); renderStrip(session, null); saveConversation();
     $('#refreshStatus').textContent = '갱신했어요. 추천은 새 충전 정보로 다시 받아 주세요.';
     if (!$('#chat').hidden) $('#follow').innerHTML = '<button type="button" data-text="새 충전 정보와 지금 조건으로 다시 추천해줘">지금 조건으로 다시 추천</button>';

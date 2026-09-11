@@ -1,6 +1,10 @@
 # 담당 C - 장소 정책 (반경 필터, 중복 제거, 체류 기본값)
+import pytest
+
 from voltgo.agent.schemas import Place
-from voltgo.core.place_policy import DWELL_DEFAULT_MIN, dwell_sec_for, filter_places, haversine_m
+from voltgo.core.place_policy import (
+    DWELL_DEFAULT_MIN, auto_max_dist_m, dwell_sec_for, filter_places, haversine_m,
+)
 
 
 def _place(pid, dist):
@@ -32,3 +36,14 @@ def test_filter_limit_5(origin):
 def test_dwell_defaults_and_override():
     assert dwell_sec_for("meal") == DWELL_DEFAULT_MIN["meal"] * 60
     assert dwell_sec_for("cafe", 20) == 1200
+
+
+# 남은 시간으로 반경 자동 조정 (최소 500m, 최대 1000m)
+@pytest.mark.parametrize("available_min,dwell_min,expected", [
+    (25, 20, 500),     # 빠듯함 -> 줄이지 않고 기본 500m
+    (10, 20, 500),     # 체류가 더 길어도 500m (체류 기본값으로 후보를 빼지 않는다)
+    (40, 20, 540),     # 편도 10분 x 70m / 1.3 ≈ 538m
+    (60, 0, 1000),     # 넉넉함 -> 상한 1000m
+])
+def test_auto_max_dist(available_min, dwell_min, expected):
+    assert auto_max_dist_m(available_min * 60, dwell_min * 60) == expected

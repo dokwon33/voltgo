@@ -89,6 +89,7 @@
   aspect-ratio: 1;
   pointer-events: none;
   transform-origin: 50% 58%;
+  will-change: transform;          /* 떠 있는 동작을 합성 단계에서 처리해 매 프레임 다시 그리지 않게 */
   animation: volty-activity-float 5.2s ease-in-out infinite;
 }
 .volty-activity-sprite, .volty-activity-sprite::after {
@@ -116,6 +117,10 @@
     volty-frame-blend calc(var(--activity-duration) / 16) linear infinite;
 }
 #homeVolty[data-activity="cafe"] { --activity-duration: 4.8s; }
+/* 식사는 숟가락 든 팔이 좌우로 크게 오가는 동작이다. 몸 전체 회전·확대 흔들기까지 겹치면
+   떨려 보이므로 위아래로만 살짝 뜨게 하고, 자세 전환도 카페와 같은 속도로 늦춘다. */
+#homeVolty[data-activity="meal"] { --activity-duration: 4.8s; }
+[data-activity="meal"] .volty-activity { animation-name: volty-activity-bob; }
 #homeVolty[data-activity="convenience"] { --activity-duration: 6.4s; }
 [data-activity="convenience"] .volty-activity { animation: none; }
 #homeVolty[data-activity="mart"] { --activity-duration: 3.2s; }
@@ -206,6 +211,10 @@
   0%, 100% { transform: translate(-1px, 1px) rotate(-1.8deg) scale(1); }
   45% { transform: translate(2px, -6px) rotate(2deg) scale(1.025); }
   72% { transform: translate(1px, -3px) rotate(.5deg) scale(1.012); }
+}
+@keyframes volty-activity-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
 }
 @keyframes volty-cart-push {
   0%, 100% { transform: translate(-4px, 0) rotate(-.6deg); }

@@ -20,6 +20,7 @@ const root = path.resolve(__dirname, '..');
     });
     const fresh = () => ({now, condition_version: 1, confirmed: null, candidates: []});
     page.on('pageerror', error => errors.push(error.message));
+    let threadCount = 0;
     await page.route('**/*', async route => {
       const url = new URL(route.request().url());
       if (url.hostname !== 'voltgo.test') return route.abort();
@@ -27,7 +28,8 @@ const root = path.resolve(__dirname, '..');
       if (url.pathname.startsWith('/api/')) {
         calls++;
         const body = route.request().postDataJSON();
-        const id = body?.thread_id || url.searchParams.get('thread_id');
+        const isNew = url.pathname === '/api/session' && route.request().method() === 'POST';
+        const id = isNew ? 'character-' + (++threadCount) : (body?.thread_id || url.searchParams.get('thread_id'));
         if (!sessions.has(id)) sessions.set(id, fresh());
         const session = sessions.get(id);
         let response = null;
@@ -42,7 +44,7 @@ const root = path.resolve(__dirname, '..');
             response = {status: 'ok', candidates: session.candidates, message: '마음에 드는 곳을 골라 주세요.'};
           }
         }
-        return route.fulfill({json: {session, response, instance_id: 'one', pending_approval: null, exists: true}});
+        return route.fulfill({json: {session, response, thread_id: id, instance_id: 'one', pending_approval: null, exists: true}});
       }
       const file = url.pathname === '/' ? '/index.html' : url.pathname;
       try {

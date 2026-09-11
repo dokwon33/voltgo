@@ -10,14 +10,16 @@ const assert=require('node:assert/strict');
   const errors=[], asks=[];page.on('pageerror',e=>errors.push(e.message));
   const root=path.resolve(__dirname,'..');
   const snapshot={now:'2026-09-11T14:00:00+09:00',condition_version:1,candidates:[],charging:{charging:true,soc_pct:40,target_soc_pct:80}};
-  let releaseInitial;
+  let releaseInitial, threadCount=0;
   await page.route('**/*',async route=>{
    const url=new URL(route.request().url());
    if(url.hostname!=='voltgo.test')return route.abort();
    if(url.pathname==='/api/health')return route.fulfill({json:{user_id:'new-chat',instance_id:'server',clock:'fixed'}});
    if(url.pathname==='/api/session'){
-    if(!url.searchParams.has('existing'))await new Promise(resolve=>{releaseInitial=resolve;});
-    return route.fulfill({json:{instance_id:'server',exists:true,session:snapshot}});
+    if(route.request().method()!=='POST')return route.fulfill({json:{instance_id:'server',session:snapshot,thread_id:url.searchParams.get('thread_id')}});
+    const id='chat-'+(++threadCount);
+    if(threadCount===1)await new Promise(resolve=>{releaseInitial=resolve;});   // 첫 대화의 세션 응답만 늦게 온다
+    return route.fulfill({json:{instance_id:'server',session:snapshot,thread_id:id}});
    }
    if(url.pathname==='/api/ask'){
     const body=route.request().postDataJSON();asks.push(body);
@@ -28,9 +30,12 @@ const assert=require('node:assert/strict');
   });
   const send=async text=>{await page.locator('#input').fill(text);await page.locator('#send').click();await page.waitForFunction(()=>!busy&&lastRes);};
   const home=async()=>{await page.locator('#brandHome').click();await page.waitForFunction(()=>!document.querySelector('#home').hidden);};
-  await page.goto('https://voltgo.test');await page.waitForFunction(()=>!!threadId);
-  await send('첫 번째 대화');const first=asks.at(-1).thread_id;
-  releaseInitial();await page.waitForTimeout(100);
+  await page.goto('https://voltgo.test');await page.waitForFunction(()=>typeof send==='function');
+  while(!releaseInitial)await new Promise(resolve=>setTimeout(resolve,10));   // 첫 세션 요청이 서버(가짜)에 도착
+  // 사용자가 먼저 입력한다. 질문은 서버가 발급한 대화 ID 를 기다렸다가 보낸다.
+  await page.locator('#input').fill('첫 번째 대화');await page.locator('#send').click();
+  releaseInitial();await page.waitForFunction(()=>!busy&&lastRes);const first=asks.at(-1).thread_id;
+  assert.equal(first,'chat-1');await page.waitForTimeout(100);
   assert.equal(await page.evaluate(()=>session.condition_version),7,'Late initial session must not overwrite the chat response');
   await send('같은 대화의 후속 질문');assert.equal(asks.at(-1).thread_id,first);
   await home();await send('두 번째 새 대화');const second=asks.at(-1).thread_id;

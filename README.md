@@ -12,7 +12,7 @@
 | --- | --- | --- | --- |
 | A | 김보석 | 에이전트 조립·통합 | schemas 동결, 도구 스텁으로 루프 완성, pytest 하네스, 통합 리드 |
 | B | 조영우 | 현대차 API | OAuth·충전 상태 실호출 (안 되면 Mock) · `get_charging_status`, `calculate_time_budget` |
-| C | 이도권 | TMAP 장소 | 주변검색·통합검색, 카테고리 매핑·500m 필터 · `search_nearby_places`, `find_station` |
+| C | 이도권 | TMAP 장소 | 주변검색·통합검색, 카테고리 매핑·반경 필터(남은 시간 기준 자동) · `search_nearby_places`, `find_station` |
 | D | 김주은 | TMAP 경로 + 판정 | 보행 경로 왕복 · `get_walking_routes`, `select_feasible_plans` |
 | E | 장인우 | 승인·기억·미들웨어 | HITL 재개·Store·미들웨어 · `confirm_plan`, `save/delete_preferences`, 발표 슬라이드 |
 | F | 김선주 | 문서·품질·발표 | 설계서 최종본·README·데모 문안·발표 취합·테스트 실행·제출 zip |
@@ -126,7 +126,7 @@ voltgo/
 │   │   └── tmap_routes.py    #   TMAP 보행자 경로, 가는 길·오는 길 각각 조회 (+ Mock)
 │   ├── core/                 # 결정적 계산 (순수 함수, API/LLM 모름)
 │   │   ├── time_budget.py    #   잔여시간 → 충전 완료 시각 → 복귀 마감 → 가용시간(초)
-│   │   ├── place_policy.py   #   카테고리 매핑, 체류 기본값, 500m 필터, 중복 제거
+│   │   ├── place_policy.py   #   카테고리 매핑, 체류 기본값, 반경 필터(500~1000m 자동), 중복 제거
 │   │   └── feasibility.py    #   왕복+체류 ≤ 가용시간 판정, 정렬, 선택 뒤 재검증
 │   └── agent/                # LangChain 에이전트
 │       ├── schemas.py        #   Pydantic 데이터 계약 (ToolResult, ModelDecision, VoltGoResponse …)
@@ -204,35 +204,34 @@ python scripts/web.py --fixed    # 14:00 고정 시계 (설계서 C001 조건)
 
 `scripts/demo.py`와 같은 `ask()` / `decide()`를 표준 `http.server`로 감싼 웹 화면입니다.
 프로젝트 의존성을 설치한 가상환경에서 실행하세요. 예: `.venv/bin/python scripts/web.py`.
-`web/index.html`이 화면, `app.js`가 대화 흐름, `features.js`가 기록·조건·선호 UI를 담당합니다.
+`web/index.html`이 화면, `app.js`가 대화 흐름, `features.js`가 기록·조건·선호 UI, `map.js`가 지도를 담당합니다.
 
 | 화면 | 기능 |
 | --- | --- |
-| 홈 | 볼티, 얇은 배터리 게이지, 충전 상태·목표·완료 예상, 활동 선택, 대화 기록 |
+| 홈 | 볼티, 배터리 게이지, 충전 상태·목표·완료 예상, 활동 선택, 대화 기록 |
 | 차량 아이콘 | 충전 상세·측정/조회 시각·계산 출처, 충전 정보 강제 새로고침 |
 | 대화 | 추천 카드, 왕복 상세, 조건 편집, 충전소 후보 선택, 지난 추천 비활성화 |
 | 확정한 목적지 | 목적지 이름·지도 버튼 강조, 목적지 유지·다른 후보 선택·조건별 재검색 |
 | 내 취향 | 저장된 선호 조회·변경·삭제, 실제 저장 내용과 120초 승인 만료 표시 |
-| 대화 기록 | 이 브라우저에 최근 20개 보관, 새 대화, 살아 있는 서버 thread 재개, 과거 기록 조회 |
-| 지도 | 출발지·장소 마커, 가는 길/오는 길. 브라우저 지도 키 및 실제 경로 좌표 필요 |
+| 대화 기록 | 이 브라우저에 사용자별 최근 20개 보관, 새 대화, 살아 있는 서버 대화 재개, 과거 기록 조회 |
+| 지도 | 출발 충전소·장소 마커, 가는 길/오는 길. 지도 키가 없으면 OpenStreetMap 기본 지도 |
 
 | API | 내용 |
 | --- | --- |
-| `GET /api/health` | 충전·TMAP 모드, 시계, 모델, user_id, 서버 instance_id |
-| `GET /api/session?thread_id=` | 차량·차량 목표·조건·현재 후보·선호·대기 승인·map_data |
-| `GET /api/session?existing=1&thread_id=` | 이미 존재하는 대화인지 조회. 없는 thread를 만들지 않음 |
-| `POST /api/ask` | `{thread_id, instance_id, text, selection?}`. 선택한 후보 ID·버전·생성시각 검증 |
-| `POST /api/decide` | `{thread_id, instance_id, decision, request_id}`. approve/reject 재전송 중복 방지 |
-| `POST /api/refresh` | `{thread_id, instance_id}`. 강제 충전 조회, 이전 추천 무효화 |
+| `GET /map-config.js` | `.env`의 `TMAP_MAP_APP_KEY`(브라우저 공개용 지도 키)만 주입 |
+| `GET /api/health` | 접속 세션 확인과 실행 정보(충전·TMAP 모드, 시계, 모델, user_id) |
+| `POST /api/session` `{}` | 현재 사용자 소유의 새 대화 ID를 서버에서 발급 |
+| `GET /api/session?thread_id=` | 본인 대화의 Session 요약, 대기 중 승인, `map_data` 복원 |
+| `POST /api/ask` `{thread_id, text, selection?}` | 선택한 후보의 ID·버전·생성시각을 검증한 뒤 `ask()` |
+| `POST /api/decide` `{thread_id, approval_id, decision}` | 본인 대화에서 발급한 승인 ID에만 `approve` / `reject` 적용 |
+| `POST /api/charging/refresh` `{thread_id}` | 본인 대화의 충전 상태 강제 조회, 이전 추천 무효화 |
 
-[프론트 반영 결과와 팀에 보낼 요청](docs/frontend-handoff.md),
-[지도 데이터 계약](docs/map-frontend-contract.md), [배터리 표시 기준](docs/battery-ui.md).
-서버 재시작을 넘는 대화 재개와 수동 잔여시간 입력은 추가 백엔드 연결이 필요합니다.
+지도 키는 `.env`의 `TMAP_MAP_APP_KEY`에 설정합니다. 웹 서버가 `/map-config.js`에 이 값만 전달하며, 브라우저에서 공개되는 키입니다.
+장소·경로 조회용 `TMAP_APP_KEY`는 공개하지 않습니다. 지도 키가 없으면 로컬 Leaflet과 OpenStreetMap 타일로 기본 지도를 보여줍니다.
+
+웹 서버는 localhost에서 사용하는 단일 프로세스 데모이며 **접속 세션별로 선호·대화·승인을 격리**합니다.
+다른 사용자의 대화·승인 ID는 조회하거나 실행할 수 없습니다. HTTPS 환경에서는 `VOLTGO_COOKIE_SECURE=true`를 설정합니다.
 웹 서버 코드를 업데이트한 뒤에는 실행 중인 Python 서버도 재시작하세요.
-
-지도 키는 `.env`의 `TMAP_MAP_APP_KEY`에 설정합니다. 웹 서버가 `/map-config.js`에
-이 값만 전달하며, 브라우저에서 공개되는 키입니다. 장소·경로 조회용 `TMAP_APP_KEY`는
-자동으로 공개하지 않습니다. 현재 접속자 격리는 별도 통합 작업 중이며, 웹은 한 사용자 ID를 공유합니다.
 
 ### 실행 모드
 
@@ -254,7 +253,9 @@ python scripts/probe_tmap_places.py "역삼역 전기차충전소"   # 호출 5�
 | 확인 항목 (2026-09-10, 역삼역 기준) | 결과 |
 | --- | --- |
 | 인증 | `appKey` 헤더. 키가 잘못되면 `403 INVALID_API_KEY` → 키 값·TMAP 상품 사용 신청 확인 |
-| 주변검색 `radius` | km 정수 → `radius=1` 로 받고 코드에서 500m 필터. 카테고리마다 500m 안에 5곳 이상 확보 |
+| 주변검색 `radius` | km 정수 → `radius=1` 로 받고 코드에서 직선거리 필터. 카테고리마다 500m 안에 5곳 이상 확보 |
+| 반경 자동 조정 | `(가용 − 체류) ÷ 2 × 70m/분 ÷ 1.3` → 500~1000m. 시간이 넉넉할 때만 넓히고 줄이지는 않음 (체류 기본값으로 후보를 빼지 않기 위해) |
+| 반경 넓히기 재검색 | 받아 둔 1km 목록을 다시 거르기만 함 → **API 재호출 없음**. 빈 결과면 넓힐 여지(1000m 미만/이미 최대)를 도구 결과로 알려 줌 |
 | 식사 카테고리 | `meal=음식` 으로 식당 검색 확인 |
 | 업종 필드 | 주변검색 응답에는 없음 (통합검색에만 있음) → `raw_category` 는 보통 빈 값 |
 | 주차장 복제 항목 | 같은 id 로 `OO 주차장` 이 섞여 옴 → 본 장소만 남기고 제외 |
@@ -268,9 +269,11 @@ from voltgo.agent.agent import build_agent, ask, decide
 agent = build_agent()
 res = ask(agent, "30분 안에 밥 먹고 싶어", context, thread_id="t1")   # context 는 scripts/demo.py 의 make_context 참고
 if res.status == "awaiting_approval":
-    res = decide(agent, "approve", context, thread_id="t1")
+    res = decide(agent, "approve", context, thread_id="t1", request_id=res.request_id)
 print(res.status, res.message)
 ```
+
+승인 재전송 계약과 Session 사용법은 [A 작업 문서](docs/tasks/A-request-idempotency.md)를 참고하세요.
 
 ## 9. 데이터 출처
 
@@ -288,8 +291,10 @@ print(res.status, res.message)
 - [x] `core/` 시간 계산 로직 구현 + 테스트
 - [x] `clients/` API 클라이언트 구현 + Mock 테스트
 - [x] TMAP 장소 실호출 확인·반영 (주차장 중복 제거, 충전소 후보 선택) — C
-- [ ] TMAP 보행 경로 실호출 반영 (`tmap_base` 공용 클라이언트 전환) — D
-- [ ] 현대차 충전 상태 실호출 — B
+- [x] TMAP 보행 경로 반영 (`tmap_base` 공용 클라이언트 전환, 부분 실패 처리) — D
+- [x] 현대차 목표 SoC 불일치 처리·필드 보완 — B (실계정 호출은 확인 중)
+- [x] 남은 시간 기준 검색 반경 자동 조정 — C
+- [x] 반경 넓히기 재검색 시 API 재호출 없이 재사용 — C
 - [x] `agent/` LLM 에이전트 연결 (도구·구조화 출력·HITL·미들웨어)
 - [ ] 시연 시나리오 구성
 

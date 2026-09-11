@@ -24,13 +24,13 @@ const page=await browser.newPage({viewport:{width:390,height:844}});
 page.setDefaultTimeout(15000);
 const errors=[]; page.on('pageerror',e=>errors.push(e.message));
 let payload={response:{status:'ok',message:'추천 장소입니다.',candidates:[c('A','추천 카페 A'),c('B','추천 카페 B')]},session:{},map_data:geometry};
-let sdkRequests=0, failSDK=false, delaySDK=0, key='test-browser-key', apiCalls=0, failTiles=true;
+let threadCount=0, sdkRequests=0, failSDK=false, delaySDK=0, key='test-browser-key', apiCalls=0, failTiles=true;
 await page.route('**/*',async route=>{
  const url=new URL(route.request().url());
  if(url.hostname==='apis.openapi.sk.com'){sdkRequests++; if(delaySDK)await new Promise(r=>setTimeout(r,delaySDK));return failSDK?route.abort():route.fulfill({contentType:'application/javascript',body:sdk});}
  if(url.hostname==='tile.openstreetmap.org') return failTiles ? route.abort() : route.fulfill({contentType:'image/png',body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=','base64')});
  if(url.hostname!=='voltgo.test')return route.abort();
- if(url.pathname.startsWith('/api/')){apiCalls++;return route.fulfill({json:url.pathname==='/api/session'?{session:{}}:url.pathname==='/api/health'?{}:payload});}
+ if(url.pathname.startsWith('/api/')){apiCalls++;return route.fulfill({json:url.pathname==='/api/session'?{session:{},thread_id:'map-'+(++threadCount)}:url.pathname==='/api/health'?{}:payload});}
  if(url.pathname==='/map-config.js')return route.fulfill({contentType:'application/javascript',body:`window.VOLTGO_MAP_CONFIG={appKey:${JSON.stringify(key)}};`});
  const path=url.pathname==='/'?'/index.html':url.pathname;
  const type=path.endsWith('.js')?'application/javascript':path.endsWith('.css')?'text/css':path.endsWith('.png')?'image/png':path.endsWith('.woff2')?'font/woff2':'text/html';

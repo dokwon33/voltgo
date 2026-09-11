@@ -17,6 +17,7 @@ const root = path.resolve(__dirname, '..');
       evaluated_at: now, poi_source: 'mock', route_source: 'mock', opening_status: 'unknown'});
     const a = candidate('A', '잠깐의 커피'), b = candidate('B', '충전소 옆 작은 골목 테이크아웃 카페');
     const session = {now, condition_version: 1, candidates: [], confirmed: null, origin: '출발 충전소'};
+    let threadCount = 0;
     const envelope = response => ({session, instance_id: 'destination-test', exists: true, response,
       map_data: {origin: {latitude: 37.5, longitude: 127.03},
         places: [a, b].map((c, i) => ({poi_id: c.poi_id, latitude: 37.501 + i / 1000, longitude: 127.032})), routes: []}});
@@ -31,7 +32,7 @@ const root = path.resolve(__dirname, '..');
         session.confirmed = selected ? {plan_id: selected.plan_id, version: 1} : null;
         return route.fulfill({json: envelope({status: selected ? 'confirmed' : 'ok', message: selected ? '목적지를 정했어요.' : '다녀올 수 있는 곳이에요.', candidates: selected ? [selected] : [a, b]})});
       }
-      if (u.pathname === '/api/session') return route.fulfill({json: envelope(null)});
+      if (u.pathname === '/api/session') return route.fulfill({json: {...envelope(null), thread_id: route.request().method() === 'POST' ? 'destination-' + (++threadCount) : u.searchParams.get('thread_id')}});
       const file = u.pathname === '/' ? '/index.html' : u.pathname;
       const type = {'.html': 'text/html', '.css': 'text/css', '.js': 'application/javascript', '.png': 'image/png', '.woff2': 'font/woff2'}[path.extname(file)];
       try { return route.fulfill({contentType: type || 'application/octet-stream', body: await fs.readFile(root + file)}); }

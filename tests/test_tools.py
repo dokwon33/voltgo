@@ -39,14 +39,14 @@ def test_c001_happy_path_and_confirm(context):
     r = tools.select_feasible_plans.func(rt(context), dwell_min=12)
     assert [p["plan_id"] for p in r["data"]] == ["A", "B"]
 
-    # 확정 (승인은 미들웨어가 했다고 가정)
+    # 선택한 계획을 추가 승인 없이 재검증 후 확정
     version = s.candidates["A"].version
     r = tools.confirm_plan.func(rt(context), plan_id="A", version=version)
     assert r["status"] == "ok"
     assert s.confirmed.plan_id == "A"
     assert s.confirmed.leave_by == s.time_budget.return_deadline - timedelta(minutes=5)
 
-    # C017 같은 요청 재전송 -> 새 기록 없이 이전 결과
+    # 같은 plan_id/version 재확정 -> 새 기록 없이 이전 결과
     again = tools.confirm_plan.func(rt(context), plan_id="A", version=version)
     assert again["message"] == "이미 확정된 계획"
 
@@ -159,13 +159,13 @@ def test_route_refresh_invalidates_confirmed_plan(context):
     plan = _prepare_candidate(context)
     assert tools.confirm_plan.func(rt(context), plan_id="A", version=plan.version)["status"] == "ok"
     assert context.session.confirmed is not None
-    assert context.session.confirmed_by_request
+    assert context.session.confirmed_by_plan
 
     result = tools.get_walking_routes.func(rt(context), poi_ids=["A"])
 
     assert result["status"] == "ok"
     assert context.session.confirmed is None
-    assert context.session.confirmed_by_request == {}
+    assert context.session.confirmed_by_plan == {}
     assert context.session.candidates == {}
     assert context.session.condition_version == plan.version + 1
 
