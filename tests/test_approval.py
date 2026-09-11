@@ -156,3 +156,92 @@ def test_승인_화면에_계획_ID_와_선호_내용이_보인다():
 def test_잘못된_결정값은_거부한다():
     with pytest.raises(ValueError):
         resume_command("yes")
+
+
+# ================================================================
+# 승인 대기 만료 vs 후보 신선도 (C016)  — 두 시각은 다른 것을 잰다
+# ================================================================
+from datetime import timedelta                                    # noqa: E402
+
+from voltgo.agent import tools                                    # noqa: E402
+from voltgo.agent.state import Context                            # noqa: E402
+
+
+class _RT:
+    """ToolRuntime 대역. 도구는 runtime.context 만 쓴다."""
+
+    def __init__(self, context: Context):
+        self.context = context
+
+
+def _plan_ready(context):
+    """C001 조건으로 후보 A 까지 만들어 둔다."""
+    tools.get_charging_status.func(_RT(context))
+    tools.calculate_time_budget.func(_RT(context), user_limit_min=30)
+    tools.search_nearby_places.func(_RT(context), category="meal")
+    tools.get_walking_routes.func(_RT(context), poi_ids=["A", "B"])
+    tools.select_feasible_plans.func(_RT(context), dwell_min=12)
+    return context.session.candidates["A"].version
+
+
+def test_승인_요청_후_2분이_지나면_확정을_거절한다(context):
+    version = _plan_ready(context)
+    s = context.session
+    base = context.clock()
+    s.approval_requested_at = base - timedelta(seconds=121)
+
+    r = tools.confirm_plan.func(_RT(context), plan_id="A", version=version)
+    assert r["status"] == "error"
+    assert r["error_code"] == "APPROVAL_EXPIRED"
+    assert s.confirmed is None, "만료된 승인으로 확정되면 안 된다"
+
+
+def test_승인_요청_직후에는_후보_생성_시각이_조금_지나도_확정된다(context):
+    """후보를 만든 시각이 아니라 승인을 물어본 시각으로 재야 한다."""
+    version = _plan_ready(context)
+    s = context.session
+    base = context.clock()
+    # 후보는 2분 30초 전에 만들었지만, 승인은 방금 물어봤다
+    s.candidates["A"].evaluated_at = base - timedelta(seconds=150)
+    s.approval_requested_at = base
+
+    r = tools.confirm_plan.func(_RT(context), plan_id="A", version=version)
+    assert r["status"] == "ok", "승인 직후인데 후보 생성 시각 때문에 거절되면 안 된다"
+    assert s.approval_requested_at is None, "확정 후에는 다음 승인을 새로 잰다"
+
+
+def test_후보가_너무_오래되면_따로_거절한다(context):
+    version = _plan_ready(context)
+    s = context.session
+    base = context.clock()
+    s.candidates["A"].evaluated_at = base - timedelta(seconds=400)
+    s.approval_requested_at = base
+
+    r = tools.confirm_plan.func(_RT(context), plan_id="A", version=version)
+    assert r["status"] == "error"
+    assert r["error_code"] == "STALE_CANDIDATE", "승인 만료와 다른 사유로 구분돼야 한다"
+
+
+def test_승인_요청_시각은_승인_화면이_뜰_때_기록된다(context):
+    from langchain_core.messages import AIMessage
+
+    from voltgo.agent.approval import mark_approval_requested
+
+    s = context.session
+    assert s.approval_requested_at is None
+
+    state = {"messages": [AIMessage(content="", tool_calls=[
+        {"name": "confirm_plan", "args": {"plan_id": "A", "version": 1}, "id": "t1", "type": "tool_call"}])]}
+    mark_approval_requested.after_model(state, _RT(context))
+    assert s.approval_requested_at == context.clock()
+
+
+def test_읽기_도구만_제안되면_승인_시각을_기록하지_않는다(context):
+    from langchain_core.messages import AIMessage
+
+    from voltgo.agent.approval import mark_approval_requested
+
+    state = {"messages": [AIMessage(content="", tool_calls=[
+        {"name": "search_nearby_places", "args": {"category": "meal"}, "id": "t1", "type": "tool_call"}])]}
+    mark_approval_requested.after_model(state, _RT(context))
+    assert context.session.approval_requested_at is None

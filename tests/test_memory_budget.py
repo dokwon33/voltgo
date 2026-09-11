@@ -119,3 +119,44 @@ def test_여력이_있으면_일시_오류는_한_번_재시도한다():
     assert model_budget.wrap_model_call(_Request(session), handler) == "ok"
     assert calls["n"] == 2
     assert session.counters["model"] == 2
+
+
+# ================================================================
+# C014 : 프로세스를 새로 띄워도 선호가 복원된다
+# ================================================================
+import subprocess                                                  # noqa: E402
+import sys                                                         # noqa: E402
+from pathlib import Path                                           # noqa: E402
+
+_CHILD = """
+import sys
+from pathlib import Path
+from voltgo.agent import memory
+
+memory.PREF_DIR = Path(sys.argv[1])
+record = memory.load_preferences(sys.argv[2])
+print("NONE" if record is None else record.preferred_category)
+"""
+
+
+def _run_child(pref_dir: Path, user_id: str) -> str:
+    """같은 선호 폴더를 보는 새 파이썬 프로세스에서 읽어 온다."""
+    src = Path(__file__).resolve().parents[1] / "src"
+    out = subprocess.run([sys.executable, "-c", _CHILD, str(pref_dir), user_id],
+                         capture_output=True, text=True, env={"PYTHONPATH": str(src), "PATH": ""})
+    assert out.returncode == 0, out.stderr
+    return out.stdout.strip()
+
+
+def test_새_프로세스에서도_저장한_선호가_복원된다(tmp_path):
+    memory.PREF_DIR = tmp_path / "prefs"          # autouse fixture 가 이미 바꿔 두지만 명시
+    memory.save_preferences(_rec("u1", "cafe"))
+
+    assert _run_child(memory.PREF_DIR, "u1") == "cafe", "재시작 후 복원되지 않았다"
+
+
+def test_새_프로세스에서도_다른_사용자_선호는_안_보인다(tmp_path):
+    memory.PREF_DIR = tmp_path / "prefs"
+    memory.save_preferences(_rec("u1", "cafe"))
+
+    assert _run_child(memory.PREF_DIR, "u2") == "NONE"

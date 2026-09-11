@@ -21,7 +21,8 @@ from voltgo.core.place_policy import DWELL_DEFAULT_MIN, MAX_ROUTE_CANDIDATES, fi
 from voltgo.core import time_budget
 from voltgo.core.time_budget import STALE_AFTER_SEC
 
-APPROVAL_TTL_SEC = 120   # 승인 대기 2분 넘으면 무효 (설계서 3.3)
+APPROVAL_TTL_SEC = 120   # 승인 화면을 띄운 뒤 2분 넘으면 무효 (설계서 3.3)
+CANDIDATE_TTL_SEC = 300  # 후보를 만든 지 5분 넘으면 데이터가 오래된 것
 
 
 def _fetch_charging(ctx):
@@ -328,8 +329,14 @@ def confirm_plan(runtime: ToolRuntime, plan_id: str, version: int) -> dict:
         return tool_error("PRECONDITION_FAILED", "통과한 후보에 없는 plan_id 입니다")
     if plan.version != s.condition_version or version != plan.version:
         return tool_error("VERSION_MISMATCH", "조건이 바뀌었습니다. 다시 선별하세요.")
-    if (now - plan.evaluated_at).total_seconds() > APPROVAL_TTL_SEC:
+    # 두 가지는 다른 검사다.
+    #   승인 대기  : 승인 화면을 띄운 뒤 사용자가 오래 답이 없었는지
+    #   후보 신선도: 후보를 만든 뒤 시간이 많이 흘렀는지
+    requested_at = s.approval_requested_at
+    if requested_at is not None and (now - requested_at).total_seconds() > APPROVAL_TTL_SEC:
         return tool_error("APPROVAL_EXPIRED", "승인 대기가 2분을 넘었습니다. 다시 선별하세요.")
+    if (now - plan.evaluated_at).total_seconds() > CANDIDATE_TTL_SEC:
+        return tool_error("STALE_CANDIDATE", "후보를 만든 지 오래됐습니다. 다시 선별하세요.")
 
     # 확정 직전 최신 충전 상태 + 현재 시각으로 같은 계산을 다시 돌린다 (C006)
     try:
@@ -352,6 +359,7 @@ def confirm_plan(runtime: ToolRuntime, plan_id: str, version: int) -> dict:
                               return_at=rechecked.return_at, leave_by=rechecked.leave_by)
     s.confirmed = confirmed
     s.confirmed_by_request[key] = confirmed
+    s.approval_requested_at = None      # 다음 승인은 새로 잰다
     s.candidates[plan_id] = rechecked
     return ToolResult(status="ok", data=confirmed, observed_at=now,
                       message=f"확정. 늦어도 {confirmed.leave_by:%H:%M} 에는 장소에서 출발").dump()
