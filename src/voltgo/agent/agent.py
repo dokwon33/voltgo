@@ -11,7 +11,7 @@ from langchain.agents.structured_output import ToolStrategy
 from langchain.chat_models import init_chat_model
 from langgraph.checkpoint.memory import InMemorySaver
 
-from voltgo.agent.approval import approval_middleware, resume_command
+from voltgo.agent.approval import approval_middleware, mark_approval_requested, pending_approvals, resume_command
 from voltgo.agent.assembler import assemble, error_response
 from voltgo.agent.middleware import (
     input_validation, model_budget, output_integrity, preference_prompt, tool_policy,
@@ -48,7 +48,9 @@ def build_agent(model=None, checkpointer=None):
             preference_prompt,      # wrap_model_call
             model_budget,           # wrap_model_call
             tool_policy,            # wrap_tool_call
-            approval_middleware(),  # after_model (HITL)
+            approval_middleware(),  # after_model (HITL) - save_preferences 만 interrupt
+            mark_approval_requested,  # after_model - 승인 요청 시각 기록.
+                                      #   after_model 은 등록 역순으로 실행되므로 HITL 뒤에 둬야 interrupt 전에 돈다
             output_integrity,       # after_agent
         ],
         checkpointer=checkpointer or InMemorySaver(),   # 단기 메모리 (thread_id 별)
@@ -73,7 +75,31 @@ def ask(agent, text: str, context: Context, thread_id: str) -> VoltGoResponse:
     return assemble(result, context)
 
 
-def decide(agent, decision: str, context: Context, thread_id: str, reason: str = "") -> VoltGoResponse:
-    """승인 대기 중인 thread 를 approve / reject 로 재개"""
-    result = agent.invoke(resume_command(decision, reason), _config(thread_id), context=context)
+def decide(agent, decision, context: Context, thread_id: str, reason: str = "") -> VoltGoResponse:
+    """승인 대기 중인 thread 를 approve / reject 로 재개.
+
+    decision 은 "approve"/"reject" 하나(대기 중인 모든 요청에 같은 결정) 또는
+    요청 순서대로 나열한 리스트. 대기 요청 개수는 checkpoint 에서 읽어 맞춘다.
+    """
+    config = _config(thread_id)
+    pending = pending_approvals(agent, config)
+    if not pending:
+        return error_response(context, "NO_PENDING_APPROVAL", "승인을 기다리는 요청이 없습니다.")
+    if isinstance(decision, (list, tuple)) and len(decision) != len(pending):
+        return error_response(context, "DECISION_COUNT_MISMATCH",
+                              f"대기 중인 요청은 {len(pending)}개인데 결정은 {len(decision)}개입니다.")
+    try:
+        command = resume_command(decision, reason, count=len(pending))
+    except ValueError:
+        return error_response(context, "INVALID_DECISION", "approve 또는 reject로 응답해 주세요.")
+    try:
+        result = agent.invoke(command, config, context=context)
+    except RuntimeError as e:
+        if str(e) == "MODEL_BUDGET_EXCEEDED":
+            return error_response(context, "LIMIT_EXCEEDED", "모델 호출 한도(8회)에 도달해 중단했습니다.")
+        raise
+    finally:
+        # 묶음 내 도구가 모두 끝난 뒤 정리한다. 재개 중 새 승인 요청이 생기면 유지한다.
+        if not pending_approvals(agent, config):
+            context.session.approval_requested_at = None
     return assemble(result, context)

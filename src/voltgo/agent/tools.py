@@ -13,7 +13,7 @@ from langchain.tools import ToolRuntime, tool
 
 from voltgo.agent import memory
 from voltgo.agent.schemas import (
-    Category, ConfirmedPlan, DeleteResult, PreferenceRecord, ToolResult, tool_error,
+    Category, ConfirmedPlan, DeleteResult, ToolResult, tool_error,
 )
 from voltgo.clients import ClientError
 from voltgo.core import feasibility
@@ -23,7 +23,8 @@ from voltgo.core.place_policy import (
 from voltgo.core import time_budget
 from voltgo.core.time_budget import STALE_AFTER_SEC
 
-APPROVAL_TTL_SEC = 120   # 승인 대기 2분 넘으면 무효 (설계서 3.3)
+APPROVAL_TTL_SEC = 120   # 승인 화면(save_preferences)을 띄운 뒤 2분 넘으면 그 승인은 무효 (설계서 3.3)
+CANDIDATE_TTL_SEC = 300  # 후보를 만든 지 5분 넘으면 데이터가 오래된 것
 
 
 def _fetch_charging(ctx):
@@ -381,12 +382,12 @@ def select_feasible_plans(runtime: ToolRuntime, dwell_min: Optional[int] = None,
 
 
 # ---------------------------------------------------------------
-# 6. 계획 확정 (HITL 승인 뒤에만 실행된다)
+# 6. 계획 확정 (승인 화면 없이, 현재 시각·최신 상태로 재검증한 뒤 실행된다)
 # ---------------------------------------------------------------
 @tool
 def confirm_plan(runtime: ToolRuntime, plan_id: str, version: int) -> dict:
-    """사용자가 선택한 계획을 승인 뒤 다시 검증해서 현재 대화의 확정 계획으로 기록합니다.
-    사용자가 후보를 골랐을 때만 호출합니다.
+    """사용자가 선택한 계획을 현재 시각과 최신 충전 상태로 다시 검증해서 현재 대화의 확정 계획으로 기록합니다.
+    사용자가 후보를 골랐을 때만 호출합니다. 별도 승인 절차는 없습니다.
 
     Args:
         plan_id: 선택한 후보의 plan_id
@@ -406,8 +407,9 @@ def confirm_plan(runtime: ToolRuntime, plan_id: str, version: int) -> dict:
         return tool_error("PRECONDITION_FAILED", "통과한 후보에 없는 plan_id 입니다")
     if plan.version != s.condition_version or version != plan.version:
         return tool_error("VERSION_MISMATCH", "조건이 바뀌었습니다. 다시 선별하세요.")
-    if (now - plan.evaluated_at).total_seconds() > APPROVAL_TTL_SEC:
-        return tool_error("APPROVAL_EXPIRED", "승인 대기가 2분을 넘었습니다. 다시 선별하세요.")
+    # 후보 신선도: 후보를 만든 뒤 시간이 많이 흘렀으면 그 후보로 확정하지 않는다
+    if (now - plan.evaluated_at).total_seconds() > CANDIDATE_TTL_SEC:
+        return tool_error("STALE_CANDIDATE", "후보를 만든 지 오래됐습니다. 다시 선별하세요.")
 
     # 확정 직전 최신 충전 상태 + 현재 시각으로 같은 계산을 다시 돌린다 (C006)
     try:
@@ -448,23 +450,24 @@ def save_preferences(runtime: ToolRuntime, category: Optional[Category] = None,
         dwell_min: 기본 체류 시간(분), 5~60
     """
     ctx = runtime.context
+    s = ctx.session
+    now = ctx.clock()
     if category is None and dwell_min is None:
         return tool_error("NEED_INPUT", "저장할 항목이 없습니다")
     if dwell_min is not None and not (5 <= dwell_min <= 60):
         return tool_error("NEED_INPUT", "체류 시간은 5~60분")
+    # 승인 만료: 승인 화면을 띄운 뒤(approval_requested_at) 2분 넘게 답이 없었으면 그 승인은 무효 (설계서 3.3)
+    requested_at = s.approval_requested_at
+    if requested_at is not None and (now - requested_at).total_seconds() > APPROVAL_TTL_SEC:
+        return tool_error("APPROVAL_EXPIRED", "승인 대기가 2분을 넘었습니다. 저장하려면 다시 요청해 주세요.")
 
-    old = memory.load_preferences(ctx.user_id)
-    record = PreferenceRecord(
-        user_id=ctx.user_id,
-        preferred_category=category if category is not None else (old.preferred_category if old else None),
-        dwell_min=dwell_min if dwell_min is not None else (old.dwell_min if old else None),
-        consent_at=ctx.clock(),
-    )
     try:
-        memory.save_preferences(record)
+        record = memory.update_preferences(ctx.user_id, category=category,
+                                           dwell_min=dwell_min, consent_at=now)
     except OSError as e:
         # 실패했으면 기억했다고 말하면 안 된다
         return tool_error("STORE_ERROR", f"저장 실패: {type(e).__name__}")
+    # 같은 승인 묶음의 다른 저장도 동일한 만료 기준을 쓴다. 정리는 decide()가 맡는다.
     return ToolResult(status="ok", data=record, message="저장 완료").dump()
 
 
