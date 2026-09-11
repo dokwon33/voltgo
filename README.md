@@ -274,15 +274,8 @@ print(res.status, res.message)
 
 승인 재전송 계약과 Session 사용법은 [A 작업 문서](docs/tasks/A-request-idempotency.md)를 참고하세요.
 
-## 9. 데이터 출처
 
-| 데이터 | 출처 | 비고 |
-| --- | --- | --- |
-| 충전 상태 | 현대자동차 Developers API | 접근 불가 시 `data/mock/` 사용 |
-| 장소 정보 | [TMAP API (SK open API)](https://openapi.sk.com/) | POI 검색 |
-| 보행 경로 | [TMAP API (SK open API)](https://openapi.sk.com/) | 보행자 경로 |
-
-## 10. 로드맵
+## 9. 로드맵
 
 - [x] 설계: 요구사항 정리, 에이전트 Tool 스펙 정의
 - [x] TMAP API 키 발급 및 응답 탐색 (`scripts/probe_tmap_places.py`)
@@ -302,7 +295,7 @@ print(res.status, res.message)
 
 ## 재현 가능한 검증
 
-[테스트 케이스와 실행 방법](docs/testing/README.md)에 현재 구성과 입력·기대 결과·확인 근거를 정리했다.
+[테스트 케이스와 실행 방법](docs/testing/README.md)에 현재 구성과 입력·기대 결과·확인 방법를 정리했다.
 자동 검증은 외부 모델/API 대신 고정 응답을 사용하며, Python 전체 회귀와 브라우저 기록 검증을 함께 실행한다.
 
 ```bash

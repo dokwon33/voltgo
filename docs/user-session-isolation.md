@@ -1,7 +1,5 @@
 # 접속자별 웹 격리
 
-요구사항 출처: [장인우님, New 4조, 2026-09-11 12:02](https://theskala.slack.com/archives/C0BUVHWFLDT/p1789095739085709).
-
 기존 웹은 모든 접속자에게 하나의 `VOLTGO_USER_ID`를 사용하고, 클라이언트가 보낸 `thread_id`로 Context를 만들었다. 브라우저가 다르더라도 선호가 공유되고 다른 사람의 대화 ID를 알면 상태 조회·질문·승인 처리가 가능했다. 서버가 발급하고 검증한 익명 세션으로 이 경계를 분리한다.
 
 ## 데이터와 소유권
@@ -45,8 +43,6 @@
 - HTTPS 배포에서는 `VOLTGO_COOKIE_SECURE=true`로 Secure 쿠키를 사용한다. 로컬 HTTP 실행의 기본값은 false다.
 - POST는 JSON만 받는다. 다른 Origin 또는 `Sec-Fetch-Site: cross-site` 요청은 거절한다. CORS 허용 헤더는 제공하지 않는다.
 - 사용자 데이터 응답은 `Cache-Control: no-store`, `Vary: Cookie`를 사용한다.
-
-설정 근거: [MDN Set-Cookie](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Set-Cookie), [Python secrets](https://docs.python.org/3/library/secrets.html).
 
 ## 실습 범위
 
