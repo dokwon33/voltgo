@@ -140,7 +140,9 @@ voltgo/
 │       └── agent.py          #   create_agent 조립, ask() / decide()
 ├── scripts/
 │   ├── demo.py               # CLI 시연 (대화형, 승인 프롬프트 포함)
-│   └── probe_tmap_places.py  # TMAP 장소 API 실호출 확인 (원문은 data/raw/tmap/)
+│   ├── probe_tmap_places.py  # TMAP 장소 API 실호출 확인 (원문은 data/raw/tmap/)
+│   └── web.py                # 웹 화면 서버 (표준 http.server, demo.py 와 같은 ask/decide)
+├── web/                      # 웹 화면 (index.html 하나 + img/ 캐릭터 볼티)
 ├── tests/                    # pytest (계산·선별·어댑터·도구 흐름·출력 조립)
 ├── notebooks/                # 탐색/실험
 ├── docs/                     # 설계서·발표본
@@ -192,6 +194,33 @@ python scripts/demo.py --fixed   # 14:00 고정 시계 (설계서 C001 조건)
 질문: 1번으로 확정할게          → 최신 조건으로 재검증 후 확정 또는 재계획
 질문: 카페를 선호해. 다음에도 기억해줘   → [승인 요청] approve / reject
 ```
+
+### 웹 화면
+
+```bash
+python scripts/web.py            # http://localhost:8000
+python scripts/web.py --fixed    # 14:00 고정 시계 (설계서 C001 조건)
+```
+
+`scripts/demo.py` 와 같은 `ask()` / `decide()` 를 표준 `http.server` 로 감싼 것이라 추가 설치는 없다. 화면은 `web/index.html`, 캐릭터(볼티) 이미지는 `web/img/`에 있다. 지도 UI는 `web/map.js`·`web/map.css`로 분리했다.
+
+| 화면 | 보여주는 것 |
+| --- | --- |
+| 왼쪽 패널 | SoC·목표 SoC, 충전 완료 예정·복귀 마감·가용 시간, 저장된 선호, 출발 충전소·조건 버전·호출 횟수 |
+| 대화 | 상태(추천 / 확인 필요 / 가능한 후보 없음 / 승인 대기 / 확정 / 오류), 후보 카드(가는 길·체류·오는 길·여유 막대, 복귀·출발 마감, 장소·경로 출처, 영업 미확인) |
+| 선호 저장 승인 | `awaiting_approval` 이면 입력을 잠그고 승인 / 거절 버튼만 보인다 → `POST /api/decide` |
+| 새 대화 | 새 thread_id. 저장 선호가 새 thread 에서 복원되는지(C014) 볼 때 쓴다 |
+
+| API | 내용 |
+| --- | --- |
+| `GET /api/health` | 충전·TMAP Mock/실연동 여부, 시계 모드, 모델명 |
+| `GET /api/session?thread_id=` | Session 요약 (SoC, 출발지, 시간 예산, 저장 선호, 호출 횟수) |
+| `POST /api/ask` `{thread_id, text}` | `ask()` → `{response: VoltGoResponse, session}` |
+| `POST /api/decide` `{thread_id, decision}` | `decide()` — `approve` / `reject` |
+
+지도는 **UI 준비 단계**다. 현재 서버는 `map_data`를 반환하지 않으므로 지도에 실제 보행 경로가 나타나지 않는다. TMAP 브라우저 지도 키도 기본값은 비어 있다. 연결 규격과 남은 작업은 [지도 프론트 연결 계약](docs/map-frontend-contract.md)에 정리했다. 서버 API 키를 프론트에 복사하지 않는다.
+
+웹 서버는 localhost에서 사용하는 단일 사용자 시연용이다. 페이지 새로고침·새 대화는 새 thread를 만들며, 저장한 선호는 같은 사용자에게 유지된다. 승인 대기 중에는 선호 저장 승인·거절을 먼저 처리한다.
 
 ### 실행 모드
 

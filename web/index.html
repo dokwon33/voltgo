@@ -1,0 +1,533 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>VoltGo</title>
+<link rel="stylesheet" href="map.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@900&family=Gowun+Dodum&family=Noto+Sans+KR:wght@400;500;700&family=Hi+Melody&display=swap">
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #F4F9F5; --paper: #FFFFFF; --soft: #EAF5EE; --line: #DCE9E0;
+    --ink: #1B2620; --ink-2: #55685E; --ink-3: #8A9B91;
+    --green: #3DB273; --deep: #2A8A57; --mint: #BFF0D5; --lime: #9BDC5B; --glow: rgba(120, 230, 170, .38);
+    --amber: #B9801A; --amber-soft: #FFF3DA; --red: #C4503E;
+    --me: #1B2620; --me-ink: #F4F9F5;
+    --shadow: 0 12px 32px rgba(40, 90, 60, .10);
+    --ui: "Noto Sans KR", "Apple SD Gothic Neo", system-ui, sans-serif;
+    --voice: "Gowun Dodum", "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif;
+    --logo: "Nunito", system-ui, sans-serif;
+    --hand: "Hi Melody", "Gowun Dodum", cursive;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  img { max-width: 100%; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--ui); font-size: 15px; line-height: 1.5;
+         font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased; }
+  button { font: inherit; cursor: pointer; color: inherit; }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+
+  /* 화면 한 장 = 휴대폰 한 화면. 넓은 화면에서는 가운데 세로로 */
+  .phone { max-width: 430px; margin: 0 auto; min-height: 100vh; display: flex; flex-direction: column; background: var(--bg); }
+  @media (min-width: 600px) {
+    body { background: radial-gradient(60% 40% at 50% 0%, var(--soft), var(--bg) 70%); }
+    .phone { border-inline: 1px solid var(--line); }
+  }
+
+  .bar { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px 6px; }
+  .wordmark { font-family: var(--logo); font-weight: 900; font-size: 24px; letter-spacing: -.4px; display: inline-flex; align-items: center; line-height: 1; }
+  .wordmark b { color: var(--green); }
+  .wordmark svg { width: 13px; height: 17px; margin: -8px 0 0 1px; }
+  .bar-right { display: flex; gap: 6px; }
+  .icon-btn { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line); background: var(--paper); display: grid; place-content: center; padding: 0; }
+  .icon-btn svg { width: 16px; height: 16px; stroke: var(--ink-2); fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .text-btn { border: 0; background: none; color: var(--ink-3); font-size: 13px; padding: 4px 6px; }
+
+  /* ---------- 홈 ---------- */
+  .home { flex: 1; padding: 6px 20px 24px; display: flex; flex-direction: column; gap: 18px; }
+  .hero { display: flex; flex-direction: column; align-items: center; text-align: center; padding-top: 6px; }
+  .volty { width: 240px; display: block; filter: drop-shadow(0 22px 26px var(--glow)); transform-origin: 50% 82%; }
+  /* 첫 화면 인사 : 튀어나오고 -> 손 흔들고 -> 둥실 */
+  .volty.greet { cursor: pointer; animation: pop .7s cubic-bezier(.2, 1.4, .4, 1) both, wave 1.5s ease-in-out .7s 1, float 4.5s ease-in-out 2.2s infinite; }
+  @keyframes pop { from { transform: scale(.5) rotate(-10deg); opacity: 0; } to { transform: none; opacity: 1; } }
+  @keyframes wave { 0%, 100% { transform: rotate(0); } 18% { transform: rotate(-7deg) translateY(-6px); } 38% { transform: rotate(7deg) translateY(-6px); }
+                    58% { transform: rotate(-6deg) translateY(-4px); } 78% { transform: rotate(5deg) translateY(-2px); } }
+  @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-9px); } }
+  @media (prefers-reduced-motion: reduce) { .volty, .volty.greet { animation: none; } }
+  .hero-say { position: relative; margin-top: 10px; background: var(--paper); border-radius: 20px; padding: 12px 18px;
+              font-family: var(--voice); font-size: 17px; line-height: 1.45; color: var(--ink); box-shadow: var(--shadow); text-wrap: balance; }
+  .hero-say::before { content: ""; position: absolute; top: -8px; left: calc(50% - 8px); width: 16px; height: 16px; background: var(--paper); transform: rotate(45deg); border-radius: 3px; }
+  .hand { margin: 12px 0 0; font-family: var(--hand); font-size: 21px; color: var(--deep); letter-spacing: .01em; }
+
+  .car { background: var(--paper); border-radius: 20px; padding: 14px 16px; box-shadow: var(--shadow); }
+  .car-main { display: flex; align-items: center; gap: 14px; }
+  .car-times { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line); }
+  .car-times span { display: block; font-size: 12px; color: var(--ink-2); }
+  .car-times b { font-size: 21px; font-weight: 700; }
+  .car-note { margin: 10px 0 0; font-size: 12.5px; color: var(--ink-3); }
+  .ring { --soc: 0; flex: none; width: 66px; aspect-ratio: 1; border-radius: 50%; position: relative;
+          background: conic-gradient(var(--green) calc(var(--soc) * 1%), var(--soft) 0); }
+  .ring::before { content: ""; position: absolute; inset: 7px; border-radius: 50%; background: var(--paper); }
+  .ring b { position: absolute; inset: 0; display: grid; place-content: center; font-size: 16px; font-weight: 700; }
+  .car-text { display: flex; flex-direction: column; min-width: 0; }
+  .car-text b { font-size: 16px; font-weight: 700; }
+  .car-text span { font-size: 13px; color: var(--ink-2); }
+
+  .ask { margin: 4px 0 -6px; font-family: var(--voice); font-weight: 400; font-size: 18px; }
+  .intents { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .intents button { display: flex; align-items: center; gap: 10px; border: 0; background: var(--paper); border-radius: 18px; padding: 14px 14px;
+                    font-size: 15px; font-weight: 500; box-shadow: 0 4px 14px rgba(40, 90, 60, .06); text-align: left; }
+  .intents button:active { transform: scale(.98); }
+  .intents i { flex: none; width: 36px; height: 36px; border-radius: 12px; background: var(--soft); display: grid; place-content: center; }
+  .intents svg { width: 20px; height: 20px; fill: none; stroke: var(--deep); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* ---------- 대화 ---------- */
+  .chat { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .chat-top { display: flex; align-items: center; gap: 12px; padding: 4px 20px 12px; border-bottom: 1px solid var(--line); }
+  .mini-volty { flex: none; width: 58px; height: 58px; object-fit: contain; filter: drop-shadow(0 6px 10px var(--glow)); }
+  .mood { margin: 0; font-family: var(--voice); font-size: 15px; line-height: 1.35; }
+  .times { margin: 3px 0 0; font-size: 12.5px; color: var(--ink-2); display: flex; gap: 10px; flex-wrap: wrap; }
+  .times b { color: var(--ink); font-weight: 700; }
+
+  .messages { flex: 1; overflow-y: auto; padding: 16px 20px 8px; display: flex; flex-direction: column; gap: 14px; scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { .messages { scroll-behavior: auto; } }
+  .row { display: flex; gap: 8px; max-width: 94%; }
+  .row.me { align-self: flex-end; }
+  .row .mini { flex: none; width: 36px; height: 36px; object-fit: contain; margin-top: 0; }
+  .col { display: flex; flex-direction: column; gap: 8px; min-width: 0; flex: 1; }
+  .say { border-radius: 18px; padding: 10px 14px; background: var(--paper); box-shadow: 0 2px 10px rgba(40, 90, 60, .05); }
+  .row.bot .say { border-top-left-radius: 6px; font-family: var(--voice); font-size: 15.5px; }
+  .row.me .say { background: var(--me); color: var(--me-ink); border-bottom-right-radius: 6px; }
+  .say p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .say p + p { margin-top: 6px; }
+  .fine { margin: 0; font-size: 11.5px; color: var(--ink-3); padding-left: 4px; }
+  .typing { display: inline-flex; gap: 4px; padding: 6px 2px; }
+  .typing i { width: 6px; height: 6px; border-radius: 50%; background: var(--ink-3); animation: blink 1.2s infinite; }
+  .typing i:nth-child(2) { animation-delay: .2s; } .typing i:nth-child(3) { animation-delay: .4s; }
+  @keyframes blink { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .typing i { animation: none; opacity: .6; } }
+
+  /* 후보 = 다녀올 계획 한 장 */
+  .plan { background: var(--paper); border-radius: 18px; padding: 14px 16px; display: grid; gap: 8px; box-shadow: 0 2px 10px rgba(40, 90, 60, .05); }
+  .plan.done { box-shadow: 0 0 0 2px var(--green), 0 2px 10px rgba(40, 90, 60, .05); }
+  .plan-head { display: flex; align-items: center; gap: 8px; }
+  .plan-head .cat { font-size: 11.5px; color: var(--deep); background: var(--soft); padding: 2px 8px; border-radius: 999px; flex: none; }
+  .plan-head h4 { margin: 0; font-size: 17px; font-weight: 700; min-width: 0; overflow-wrap: anywhere; }
+  .plan-line { margin: 0; font-size: 14px; color: var(--ink-2); }
+  .plan-line b { color: var(--ink); font-weight: 700; }
+  .plan-line .slack { color: var(--deep); font-weight: 500; }
+  .tbar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--soft); }
+  .seg { min-width: 2px; }
+  .seg.out, .seg.in { background: var(--green); }
+  .seg.stay { background: var(--deep); }
+  .seg.slack { background: transparent; }
+  .plan-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 2px; }
+  .leave { font-size: 14px; color: var(--ink-2); }
+  .leave b { font-size: 18px; color: var(--ink); font-weight: 700; }
+  .pick { border: 0; background: var(--green); color: #fff; border-radius: 999px; padding: 8px 14px; font-weight: 500; font-size: 14px; }
+  .pick:active { transform: scale(.97); }
+  .done-tag { font-size: 13px; font-weight: 700; color: var(--deep); }
+  .plan-src { margin: 0; font-size: 11px; color: var(--ink-3); }
+
+  .arrival { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .arrival div { background: var(--soft); border-radius: 14px; padding: 10px 12px; }
+  .arrival span { display: block; font-size: 12px; color: var(--ink-2); }
+  .arrival b { font-size: 22px; font-weight: 700; }
+
+  .follow { display: flex; gap: 6px; flex-wrap: wrap; padding: 4px 20px 10px; }
+  .follow button { border: 1px solid var(--line); background: var(--paper); border-radius: 999px; padding: 6px 12px; font-size: 13px; color: var(--ink-2); }
+  .follow button:hover { border-color: var(--green); color: var(--deep); }
+
+  /* ---------- 입력 ---------- */
+  .composer { position: sticky; bottom: 0; display: flex; gap: 8px; padding: 10px 16px calc(14px + env(safe-area-inset-bottom));
+              background: linear-gradient(180deg, transparent, var(--bg) 30%); }
+  .composer input { flex: 1; min-width: 0; height: 48px; border: 1px solid var(--line); border-radius: 999px; padding: 0 18px; font: inherit;
+                    background: var(--paper); color: var(--ink); }
+  .composer input:disabled { opacity: .6; }
+  .composer button { flex: none; width: 48px; height: 48px; border-radius: 50%; border: 0; background: var(--green); display: grid; place-content: center; padding: 0; }
+  .composer button svg { width: 20px; height: 20px; fill: none; stroke: #fff; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+  .composer button:disabled { opacity: .4; cursor: default; }
+
+  /* ---------- 아래에서 올라오는 시트 (승인 / 정보) ---------- */
+  .scrim { position: fixed; inset: 0; background: rgba(228, 242, 233, .6); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); display: flex; align-items: flex-end; justify-content: center; z-index: 10; }
+  .sheet { width: 100%; max-width: 430px; background: var(--paper); border-radius: 24px 24px 0 0; padding: 22px 22px calc(22px + env(safe-area-inset-bottom));
+           display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px; box-shadow: 0 -10px 40px rgba(0, 0, 0, .15); }
+  .sheet .volty { width: 156px; margin: -100px 0 0; animation: pop .6s cubic-bezier(.2, 1.4, .4, 1) both; }
+  .sheet h3 { margin: 0; font-family: var(--voice); font-weight: 400; font-size: 20px; }
+  .sheet p { margin: 0; color: var(--ink-2); font-size: 14px; text-wrap: balance; }
+  .sheet-btns { display: flex; flex-direction: column; gap: 8px; width: 100%; margin-top: 10px; }
+  .sheet-btns button { border: 0; border-radius: 999px; padding: 13px; font-size: 15px; font-weight: 500; }
+  .sheet-btns .primary { background: var(--green); color: #fff; }
+  .sheet-btns .quiet { background: var(--soft); color: var(--ink-2); }
+  .info-list { width: 100%; display: grid; gap: 6px; text-align: left; margin-top: 4px; }
+  .info-list div { display: flex; justify-content: space-between; gap: 12px; font-size: 13.5px; border-bottom: 1px solid var(--line); padding: 6px 2px; }
+  .info-list span { color: var(--ink-3); flex: none; }
+  .info-list b { font-weight: 500; text-align: right; overflow-wrap: anywhere; }
+</style>
+</head>
+<body>
+<div class="phone">
+  <header class="bar">
+    <span class="wordmark">Volt<b>Go</b><svg viewBox="0 0 18 22" aria-hidden="true"><path d="M11 0 1 12h6l-2 10L17 8h-6z" fill="#9BDC5B"/></svg></span>
+    <div class="bar-right">
+      <button class="text-btn" id="homeBtn" type="button" hidden>처음으로</button>
+      <button class="icon-btn" id="infoBtn" type="button" aria-label="실행 정보">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- 홈 : 볼티가 먼저 인사한다 -->
+  <section class="home" id="home">
+    <div class="hero">
+      <img class="volty greet" id="homeVolty" src="img/volty_hello.png" alt="볼티" title="볼티를 누르면 다시 인사해요">
+      <div class="hero-say">지금 충전 좋으시죠?<br>근처에 다녀올 수 있는 좋은 곳을 찾아볼게요!</div>
+      <p class="hand">기다리는 시간이, 좋아지는 경험.</p>
+    </div>
+
+    <div class="car">
+      <div class="car-main">
+        <div class="ring" id="ring"><b id="soc">—</b></div>
+        <div class="car-text">
+          <b id="carMain">차량 상태를 확인하는 중…</b>
+          <span id="carSub"></span>
+        </div>
+      </div>
+      <div class="car-times" id="carTimes" hidden>
+        <div><span>충전 완료 예정</span><b id="carFinish">—</b></div>
+        <div><span>차로 돌아올 시간</span><b id="carDeadline">—</b></div>
+      </div>
+      <p class="car-note" id="carNote" hidden></p>
+    </div>
+
+    <h2 class="ask">지금 뭐 할까요?</h2>
+    <div class="intents" id="intents">
+      <button type="button" data-text="간단히 밥 먹고 오고 싶어">
+        <i><svg viewBox="0 0 24 24"><path d="M3 11h18a9 9 0 0 1-18 0z"/><path d="M6 5l9 6M12 3l5 8"/></svg></i>밥 먹고 오기</button>
+      <button type="button" data-text="커피 한잔 하고 싶어">
+        <i><svg viewBox="0 0 24 24"><path d="M4 8h12v6a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5z"/><path d="M16 10h2a2 2 0 0 1 0 4h-2M7 3v2M11 3v2"/></svg></i>커피 한잔</button>
+      <button type="button" data-text="편의점에 다녀오고 싶어">
+        <i><svg viewBox="0 0 24 24"><path d="M3 9l2-5h14l2 5M4 9h16v11H4z"/><path d="M9 20v-6h6v6"/></svg></i>편의점 들르기</button>
+      <button type="button" data-text="마트에서 장 보고 싶어">
+        <i><svg viewBox="0 0 24 24"><path d="M5 8h14l-1 12H6z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/></svg></i>장보기</button>
+    </div>
+  </section>
+
+  <!-- 대화 -->
+  <section class="chat" id="chat" hidden>
+    <div class="chat-top">
+      <img class="mini-volty" id="moodImg" src="img/volty_think.png" alt="">
+      <div>
+        <p class="mood" id="moodSay">확인하는 중이에요…</p>
+        <p class="times" id="strip" hidden></p>
+      </div>
+    </div>
+    <section class="route-map" id="routeMap" aria-labelledby="mapTitle" hidden>
+      <div class="map-heading">
+        <div><h3 id="mapTitle">걸어서 다녀오는 길</h3><p class="map-place"></p></div>
+        <button class="map-fit" type="button" disabled>전체 보기</button>
+      </div>
+      <div class="map-stage">
+        <div class="map-canvas" id="tmapCanvas" role="region" aria-label="충전소와 추천 장소 지도" hidden></div>
+        <div class="map-empty" role="status"><p>장소를 선택하면 지도를 볼 수 있어요.</p><button class="map-retry" type="button" hidden>다시 시도</button></div>
+      </div>
+      <div class="map-controls" role="group" aria-label="표시할 도보 경로">
+        <button type="button" data-direction="both" aria-pressed="true">왕복</button>
+        <button type="button" data-direction="outbound" aria-pressed="false">가는 길</button>
+        <button type="button" data-direction="inbound" aria-pressed="false">오는 길</button>
+      </div>
+      <p class="map-note" aria-live="polite"></p>
+    </section>
+    <div class="messages" id="messages"></div>
+    <div class="follow" id="follow"></div>
+  </section>
+
+  <form class="composer" id="composer">
+    <input id="input" type="text" maxlength="500" placeholder="볼티에게 말하기" autocomplete="off">
+    <button id="send" type="submit" aria-label="보내기"><svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button>
+  </form>
+
+  <!-- 승인 : 확정·저장은 사람이 한 번 더 -->
+  <div class="scrim" id="approval" hidden>
+    <div class="sheet">
+      <img class="volty" src="img/volty_clock.png" alt="">
+      <h3 id="apTitle">이 취향을 기억해둘까요?</h3>
+      <p id="apBody"></p>
+      <div class="sheet-btns">
+        <button class="primary" id="approve" type="button">네, 기억해줘</button>
+        <button class="quiet" id="reject" type="button">저장하지 않을게요</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 실행 정보 -->
+  <div class="scrim" id="info" hidden>
+    <div class="sheet">
+      <h3>실행 정보</h3>
+      <div class="info-list" id="infoList"></div>
+      <div class="sheet-btns"><button class="quiet" id="infoClose" type="button">닫기</button></div>
+    </div>
+  </div>
+</div>
+
+<script src="map-config.js"></script>
+<script src="map.js"></script>
+<script>
+  const IMG = { hello: 'img/volty_hello.png', think: 'img/volty_think.png', point: 'img/volty_point.png',
+                coffee: 'img/volty_coffee.png', clock: 'img/volty_clock.png' };
+  // 상태별 볼티 표정과 한 줄 (설계서 2.4 VoltGoResponse.status)
+  const MOOD = {
+    busy: ['think', '충전 상태랑 근처 장소, 왕복 시간을 보고 있어요…'],
+    ok: ['point', '지금 다녀올 수 있는 곳이에요. 출발 마감만 지켜 주세요!'],
+    need_input: ['think', '조금만 더 알려주시면 바로 계산해 볼게요.'],
+    no_feasible: ['think', '이번엔 시간이 빠듯해요. 더 가까운 곳은 어떠세요?'],
+    awaiting_approval: ['clock', '다음에도 쓸 취향을 저장할까요?'],
+    confirmed: ['coffee', '확정! 출발 마감 시각만 지켜 주세요.'],
+    error: ['think', '잠깐 문제가 생겼어요. 다시 말해 주세요.'],
+  };
+  const CAT = { meal: '식사', cafe: '카페', convenience: '편의점', mart: '마트' };
+  const PLUG = { fast: '급속', slow: '완속', none: '미연결' };
+  const FIELD = { charging: '충전 정보', remaining_min: '남은 충전 시간', origin: '출발 충전소', intent: '하고 싶은 일' };
+  const SHORT = { '충전 정보는 Mock 데이터입니다': '충전 Mock', '장소 정보는 Mock 데이터입니다': '장소 Mock', '보행 경로는 Mock 데이터입니다': '경로 Mock',
+                  '영업 여부는 확인되지 않았습니다': '영업 미확인', '잔여시간은 배터리 용량·평균 전력 정책값으로 추정한 값입니다': '잔여시간 추정' };
+
+  const $ = (s) => document.querySelector(s);
+  const routeMap = new VoltGoRouteMap($('#routeMap'));
+  const esc = (t) => String(t ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const hhmm = (iso) => iso ? iso.slice(11, 16) : '—';
+  const min = (sec) => Math.floor((sec || 0) / 60);
+
+  let threadId = '', busy = false, health = {}, session = {}, lastRes = null;
+
+  async function api(path, body) {
+    const opt = body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : undefined;
+    const r = await fetch(path, opt);
+    const data = await r.json().catch(() => ({ error: '서버 응답을 읽지 못했어요' }));
+    if (!r.ok || data.error) throw new Error(data.error || ('HTTP ' + r.status));
+    return data;
+  }
+
+  // ---------- 홈 카드 ----------
+  function renderCar(s) {
+    const c = s.charging, b = s.home_budget;
+    $('#carTimes').hidden = !b; $('#carNote').hidden = true;
+    if (!c) {
+      $('#soc').textContent = '—'; $('#ring').style.setProperty('--soc', 0);
+      $('#carMain').textContent = '차량 상태를 아직 못 읽었어요';
+      $('#carSub').textContent = '대화를 시작하면 다시 확인해요';
+      return;
+    }
+    if (b) {
+      $('#carFinish').textContent = hhmm(b.finish_at);
+      $('#carDeadline').textContent = hhmm(b.return_deadline);
+      $('#carNote').hidden = false;
+      $('#carNote').textContent = `복귀 버퍼 ${b.buffer_min}분을 뺀 시각이에요. 시간 제한을 말하면 다시 계산해요.`;
+    }
+    $('#ring').style.setProperty('--soc', c.soc_pct ?? 0);
+    $('#soc').textContent = c.soc_pct != null ? Math.round(c.soc_pct) + '%' : '—';
+    if (c.charging === false) $('#carMain').textContent = '지금은 충전 중이 아니에요';
+    else if (c.target_soc_pct == null) $('#carMain').textContent = '목표 충전량을 알려주세요';
+    else if (c.reported_remaining_sec) $('#carMain').textContent = `목표 ${c.target_soc_pct}%까지 약 ${min(c.reported_remaining_sec)}분`;
+    else $('#carMain').textContent = `목표 ${c.target_soc_pct}%까지 충전 중`;
+    $('#carSub').textContent = [PLUG[c.plug_type] + ' 충전', s.origin, c.source === 'mock' ? 'Mock 데이터' : ''].filter(Boolean).join(' · ');
+  }
+
+  // ---------- 대화 화면 ----------
+  function setMood(key) {
+    const [img, say] = MOOD[key] || MOOD.busy;
+    $('#moodImg').src = IMG[img];
+    $('#moodSay').textContent = say;
+  }
+  function renderStrip(s, res) {
+    const b = s.time_budget;
+    const finish = b ? b.finish_at : res && res.finish_at;
+    const dl = b ? b.return_deadline : res && res.return_deadline;
+    if (!finish && !dl) { $('#strip').hidden = true; return; }
+    $('#strip').hidden = false;
+    $('#strip').innerHTML = `<span>충전 완료 <b>${hhmm(finish)}</b></span><span>복귀 마감 <b>${hhmm(dl)}</b></span>` +
+      (b ? `<span>여유 <b>${min(b.available_sec)}분</b></span>` : '');
+  }
+  function scrollDown() { const m = $('#messages'); m.scrollTop = m.scrollHeight; }
+
+  function addMe(text) {
+    $('#messages').insertAdjacentHTML('beforeend', `<div class="row me"><div class="say"><p>${esc(text)}</p></div></div>`);
+    scrollDown();
+  }
+  function addTyping() {
+    $('#messages').insertAdjacentHTML('beforeend',
+      `<div class="row bot" id="typing"><img class="mini" src="${IMG.think}" alt=""><div class="col"><div class="say"><span class="typing"><i></i><i></i><i></i></span></div></div></div>`);
+    scrollDown();
+  }
+  function removeTyping() { const t = $('#typing'); if (t) t.remove(); }
+
+  function planCard(c, status, mapKey) {
+    const done = status === 'confirmed';
+    const seg = (sec, cls) => sec > 0 ? `<span class="seg ${cls}" style="flex:${sec}"></span>` : '';
+    const src = [c.poi_source === 'mock' ? '장소 Mock' : '장소 TMAP', c.route_source === 'mock' ? '경로 Mock' : '경로 TMAP',
+                 c.opening_status === 'unknown' ? '영업 미확인' : ''].filter(Boolean).join(' · ');
+    return `
+      <article class="plan${done ? ' done' : ''}">
+        <div class="plan-head"><span class="cat">${esc(CAT[c.category] || c.category)}</span><h4>${esc(c.name)}</h4></div>
+        <p class="plan-line">걸어서 ${min(c.outbound_sec)}분 · ${min(c.dwell_sec)}분 머물고 · <b>${hhmm(c.return_at)}</b> 복귀
+          <span class="slack">여유 ${min(c.slack_sec)}분</span></p>
+        <div class="tbar" title="가는 길 ${min(c.outbound_sec)}분 / 체류 ${min(c.dwell_sec)}분 / 오는 길 ${min(c.inbound_sec)}분 / 여유 ${min(c.slack_sec)}분">
+          ${seg(c.outbound_sec, 'out')}${seg(c.dwell_sec, 'stay')}${seg(c.inbound_sec, 'in')}${seg(c.slack_sec, 'slack')}</div>
+        <div class="plan-foot">
+          <span class="leave">늦어도 <b>${hhmm(c.leave_by)}</b> 출발</span>
+          ${done ? '<span class="done-tag">확정한 계획</span>'
+                 : `<button type="button" class="pick" data-text="${esc(c.plan_id)} 계획(${esc(c.name)})으로 확정할게">여기로 갈래요</button>`}
+        </div>
+        <p class="plan-src">${src}</p>
+        <button class="map-open" type="button" data-map-key="${mapKey}" aria-controls="routeMap" aria-pressed="false">지도에서 보기</button>
+      </article>`;
+  }
+
+  function addBot(res, mapData) {
+    const cands = res.candidates || [];
+    const mapKeys = routeMap.register(res, mapData);
+    const mood = MOOD[res.status] ? res.status : 'busy';
+    // 후보 줄("1) ...")은 카드로, 경고 줄("※")은 작은 글씨로, 시간 요약 줄은 위 띠로 옮긴다
+    const lines = (res.message || '').split('\n').filter((l) => l.trim() && !(cands.length && /^\d+\)\s/.test(l))
+      && !l.startsWith('※') && !l.startsWith('충전 완료 예정'));
+    const warns = (res.warnings || []).map((w) => SHORT[w] || w);
+    const confirmed = res.status === 'confirmed' && cands[0];
+    const html = `
+      <div class="row bot">
+        <img class="mini" src="${IMG[MOOD[mood][0]]}" alt="">
+        <div class="col">
+          ${lines.length ? `<div class="say">${lines.map((l) => `<p>${esc(l)}</p>`).join('')}</div>` : ''}
+          ${res.status === 'need_input' && (res.missing_fields || []).length
+            ? `<p class="fine">알려주시면 좋은 것: ${res.missing_fields.map((f) => esc(FIELD[f] || f)).join(', ')}</p>` : ''}
+          ${confirmed ? `<div class="arrival"><div><span>늦어도 출발</span><b>${hhmm(confirmed.leave_by)}</b></div><div><span>차량 복귀</span><b>${hhmm(confirmed.return_at)}</b></div></div>` : ''}
+          ${cands.length ? cands.map((c, i) => planCard(c, res.status, mapKeys[i])).join('') : ''}
+          ${warns.length ? `<p class="fine">※ ${warns.map(esc).join(' · ')}</p>` : ''}
+        </div>
+      </div>`;
+    $('#messages').insertAdjacentHTML('beforeend', html);
+    if (mapKeys.length) routeMap.select(mapKeys[0]);
+    else routeMap.hide();
+    setMood(mood);
+    renderFollow(res);
+    if (res.status === 'awaiting_approval') openApproval(res);
+    scrollDown();
+  }
+
+  function addError(text) {
+    $('#messages').insertAdjacentHTML('beforeend',
+      `<div class="row bot"><img class="mini" src="${IMG.think}" alt=""><div class="col"><div class="say"><p>${esc(text)}</p></div></div></div>`);
+    setMood('error'); $('#follow').innerHTML = ''; scrollDown();
+  }
+
+  // 답변 다음에 이어 말할 만한 것들
+  function renderFollow(res) {
+    const c = (res.candidates || [])[0];
+    let items = [];
+    if (res.status === 'ok' && c) items = [['20분은 걸릴 것 같아요', `${CAT[c.category] || '체류'}는 20분 걸려`], ['카페로 바꿔볼래요', '카페로 바꿔서 다시 찾아줘']];
+    else if (res.status === 'no_feasible') items = [['편의점도 괜찮아요', '편의점도 괜찮아. 다시 찾아줘'], ['시간을 줄여볼게요', '체류는 10분이면 돼']];
+    else if (res.status === 'confirmed' && c) items = [['이 취향 기억해줘', `${CAT[c.category] || ''}를 선호해. 다음에도 기억해줘`]];
+    if (session.preferences && res.status !== 'awaiting_approval') items.push(['기억한 취향 지우기', '저장한 선호 지워줘']);
+    $('#follow').innerHTML = items.map(([label, text]) => `<button type="button" data-text="${esc(text)}">${esc(label)}</button>`).join('');
+  }
+
+  // ---------- 승인 시트 ----------
+  function openApproval(res) {
+    $('#apTitle').textContent = '이 취향을 기억해둘까요?';
+    $('#apBody').textContent = (res.message || '선호를 저장할까요?').replace(/\s*\(approve \/ reject\)/g, '')
+      + '\n승인하면 다음 대화에도 사용해요. 2분이 지나면 다시 요청해 주세요.';
+    $('#approve').textContent = '네, 기억해줘';
+    $('#reject').textContent = '저장하지 않을게요';
+    $('#approval').hidden = false;
+    setLock();
+  }
+
+  function setLock() {
+    const awaiting = !$('#approval').hidden;
+    $('#input').disabled = busy || awaiting;
+    $('#send').disabled = busy || awaiting;
+    $('#input').placeholder = awaiting ? '위에서 먼저 결정해 주세요' : '볼티에게 말하기';
+    document.querySelectorAll('#follow button, #intents button, button.pick').forEach((b) => (b.disabled = busy || awaiting));
+    $('#approve').disabled = busy; $('#reject').disabled = busy;
+    $('#homeBtn').disabled = busy;
+  }
+
+  // ---------- 실행 정보 ----------
+  function renderInfo() {
+    const p = session.preferences, k = session.counters || {};
+    const rows = [
+      ['충전 데이터', health.charging === 'mock' ? 'Mock' : '현대차 실연동'],
+      ['장소·경로', health.tmap === 'tmap' ? 'TMAP 실연동' : 'Mock'],
+      ['시계', health.clock === 'fixed' ? '2026-09-10 14:00 고정' : '실제 시각'],
+      ['모델', health.model || '—'],
+      ['기억한 취향', p ? [CAT[p.preferred_category], p.dwell_min ? `체류 ${p.dwell_min}분` : ''].filter(Boolean).join(' · ') : '없음'],
+      ['조건 버전', session.condition_version ? 'v' + session.condition_version + (session.confirmed ? ' · 확정 ' + session.confirmed.plan_id : '') : '—'],
+      ['호출 (모델 / 도구 / API)', `${k.model ?? 0} / ${k.tool ?? 0} / ${k.api ?? 0}`],
+      ['thread', threadId],
+    ];
+    $('#infoList').innerHTML = rows.map(([a, b]) => `<div><span>${esc(a)}</span><b>${esc(b)}</b></div>`).join('');
+  }
+
+  // ---------- 흐름 ----------
+  function showChat() { $('#home').hidden = true; $('#chat').hidden = false; $('#homeBtn').hidden = false; }
+
+  async function send(text) {
+    text = (text || '').trim();
+    if (!text || busy || !$('#approval').hidden) return;
+    showChat(); addMe(text); $('#input').value = '';
+    busy = true; setLock(); setMood('busy'); addTyping();
+    try {
+      const d = await api('/api/ask', { thread_id: threadId, text });
+      session = d.session; lastRes = d.response;
+      removeTyping(); renderStrip(session, d.response); addBot(d.response, d.map_data);
+    } catch (e) { removeTyping(); addError(e.message); }
+    finally { busy = false; setLock(); }
+  }
+
+  async function decideNow(decision) {
+    if (busy || $('#approval').hidden) return;
+    $('#approval').hidden = true;
+    addMe(decision === 'approve' ? $('#approve').textContent : $('#reject').textContent);
+    busy = true; setLock(); setMood('busy'); addTyping();
+    try {
+      const d = await api('/api/decide', { thread_id: threadId, decision });
+      session = d.session; lastRes = d.response;
+      removeTyping(); renderStrip(session, d.response); addBot(d.response, d.map_data);
+    } catch (e) { removeTyping(); addError(e.message); $('#approval').hidden = false; }
+    finally { busy = false; setLock(); }
+  }
+
+  function goHome() {
+    if (busy) return;
+    routeMap.reset();
+    threadId = 'web-' + Math.random().toString(36).slice(2, 8);
+    session = {}; lastRes = null;
+    $('#messages').innerHTML = ''; $('#follow').innerHTML = ''; $('#strip').hidden = true;
+    $('#approval').hidden = true; $('#chat').hidden = true; $('#home').hidden = false; $('#homeBtn').hidden = true;
+    busy = false; setLock();
+    api('/api/session?thread_id=' + threadId).then((d) => { session = d.session; renderCar(session); })
+      .catch(() => { $('#carMain').textContent = '서버가 꺼져 있어요'; $('#carSub').textContent = '터미널에서 python scripts/web.py 를 켜고 새로고침해 주세요'; $('#carTimes').hidden = true; });
+  }
+
+  $('#composer').addEventListener('submit', (e) => { e.preventDefault(); send($('#input').value); });
+  document.addEventListener('click', (e) => {
+    const mapButton = e.target.closest('button[data-map-key]');
+    if (mapButton) { routeMap.select(mapButton.dataset.mapKey, true); return; }
+    const b = e.target.closest('button[data-text]');
+    if (b && !b.disabled) send(b.dataset.text);
+  });
+  $('#approve').addEventListener('click', () => decideNow('approve'));
+  $('#reject').addEventListener('click', () => decideNow('reject'));
+  $('#homeBtn').addEventListener('click', goHome);
+  $('#homeVolty').addEventListener('click', (e) => {          // 누르면 다시 인사
+    e.target.classList.remove('greet'); void e.target.offsetWidth; e.target.classList.add('greet');
+  });
+  $('#infoBtn').addEventListener('click', () => { renderInfo(); $('#info').hidden = false; });
+  $('#infoClose').addEventListener('click', () => { $('#info').hidden = true; });
+  $('#info').addEventListener('click', (e) => { if (e.target === $('#info')) $('#info').hidden = true; });
+
+  api('/api/health').then((h) => { health = h; }).catch(() => {});
+  goHome();
+</script>
+</body>
+</html>
