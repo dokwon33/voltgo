@@ -1,11 +1,13 @@
 # A: 선호 저장 승인과 request_id 재전송 처리
 
-통합 기준: PR3·PR5·PR4가 병합된 main `a2d9ac2`.
+통합 기준: PR3·PR5·PR4·PR6가 병합된 main `4582426`.
 브랜치: `feat/a-request-idempotency`.
 
 ## 실행 정책과 구현 계획
 
 - [x] 최신 main의 충전 목표 공통 처리와 경로 갱신·후보 무효화 유지.
+- [x] 충전소 후보 선택 및 PR6의 체류 시간 전달을 프롬프트에 반영. 체류 시간 변경 시 검색→경로→선별을 다시 실행.
+- [x] 정상 빈 결과를 포함한 새 검색에서 이전 확정·중복 확정 캐시를 무효화하고 버전 갱신.
 - [x] 계획 선택은 `confirm_plan`이 현재 시각·충전 상태를 재검증한 뒤 확정. 추가 승인 없음.
 - [x] `save_preferences`만 HITL 승인. 한 배치에 여러 저장이 있으면 하나의 request_id로 관리.
 - [x] 승인 120초까지 저장 허용, 121초부터 `APPROVAL_EXPIRED`로 거부.
@@ -68,7 +70,8 @@ Session을 Graph State로 옮기지는 않았다. 프로세스 재시작 후 승
 
 계획 중복 확정 캐시는 `confirmed_by_plan`, 승인 재전송 기록은 `approval_requests`로 구분한다.
 PR5의 경로 갱신 코드와 테스트도 이 이름으로 일치시켰다.
-공개 응답에는 선택 필드 `VoltGoResponse.request_id`만 추가하며 LLM Tool 인자는 변경하지 않는다.
+A 변경으로 공개 응답에 선택 필드 `VoltGoResponse.request_id`를 추가한다.
+최신 main PR6의 `search_nearby_places.dwell_min` 및 자동 반경 계약을 유지하고 프롬프트에서 사용한다.
 PR3의 ChargingSnapshot 필드와 공통 충전 목표 계산은 유지한다.
 
 ## 재현 가능한 검증
@@ -85,6 +88,8 @@ python -m pytest tests/test_request_idempotency.py tests/test_decide_entrypoint.
 
 | 시나리오 | 입력 | 기대 결과 / 확인 |
 |---|---|---|
+| 체류 변경 | 카페 기본 체류 검색 뒤 5분으로 변경 | 반경 540m→810m, 새로 포함된 D를 실제 왕복 시간으로 판정하고 확정 |
+| 빈 재검색 | 계획 확정 뒤 장소가 없는 업종 검색 | 후보·확정·확정 캐시 삭제, 이전 버전 확정 불가 |
 | 계획 선택 | 후보 A를 선택 | confirmed, 추가 승인과 request_id 없음 |
 | 선호 만료 | 14:00 요청 뒤 120초/121초에 승인 | 120초 저장, 121초 APPROVAL_EXPIRED·파일 없음 |
 | 복수 저장 | cafe와 dwell_min=15를 함께 승인 | 두 도구 성공, 최종 파일에 두 필드 보존 |
