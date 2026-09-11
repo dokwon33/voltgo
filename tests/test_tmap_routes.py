@@ -207,3 +207,71 @@ def test_retryable_route_error_is_preserved_and_middleware_retries(context, firs
     assert len(fake.calls) == 3                  # 첫 실패 1회 + 재시도 왕복 2회
     assert payload["status"] == "ok"
     assert [route["poi_id"] for route in payload["data"]] == ["A"]
+
+
+def _call_routes_with_policy(context, poi_ids):
+    request = SimpleNamespace(
+        tool_call={"id": "mixed-route-call", "name": "get_walking_routes", "args": {"poi_ids": poi_ids}},
+        runtime=rt(context),
+    )
+    payloads = []
+
+    def handler(request):
+        result = tools.get_walking_routes.func(request.runtime, **request.tool_call["args"])
+        payloads.append(result)
+        return ToolMessage(content=json.dumps(result), tool_call_id="mixed-route-call", name="get_walking_routes")
+
+    result = tool_policy.wrap_tool_call(request, handler)
+    return json.loads(result.content), payloads
+
+
+@pytest.mark.parametrize("failure", ["503", "timeout"])
+@pytest.mark.parametrize("poi_ids", [["A", "B"], ["B", "A"]], ids=["parse_first", "transient_first"])
+def test_mixed_route_failures_retry_regardless_of_candidate_order(context, places, failure, poi_ids):
+    # A는 항상 파싱 실패. B는 일시 오류 뒤 재시도하면 왕복 경로를 복구할 수 있다.
+    invalid = FakeResp(200, {"features": [{"properties": {"totalDistance": 320}}]})
+    transient = FakeResp(503) if failure == "503" else requests.Timeout()
+    outbound, inbound = FakeResp(200, leg(240, 300)), FakeResp(200, leg(300, 350))
+    responses = ([invalid, transient, invalid, outbound, inbound] if poi_ids[0] == "A"
+                 else [transient, invalid, outbound, inbound, invalid])
+    client, fake = client_with(*responses)
+    context.routes_client = client
+    context.session.places = dict(places)
+
+    payload, attempts = _call_routes_with_policy(context, poi_ids)
+
+    assert len(attempts) == 2
+    assert (attempts[0]["error_code"], attempts[0]["retryable"]) == ("UPSTREAM", True)
+    assert payload["status"] == "partial"
+    assert [route["poi_id"] for route in payload["data"]] == ["B"]
+    assert set(context.session.routes) == {"B"}
+    assert len(fake.calls) == 5                 # 첫 실패 2회 + 재시도에서 A 실패 1회/B 왕복 2회
+
+
+def test_nonretryable_route_failures_do_not_retry(context, places):
+    client, fake = client_with(FakeResp(200, {"features": []}), FakeResp(400))
+    context.routes_client = client
+    context.session.places = dict(places)
+
+    payload, attempts = _call_routes_with_policy(context, ["A", "B"])
+
+    assert payload["status"] == "error"
+    assert (payload["error_code"], payload["retryable"]) == ("ROUTE_PARSE", False)
+    assert len(attempts) == 1 and len(fake.calls) == 2
+    assert context.session.routes == {}
+
+
+def test_mixed_route_failures_retry_at_most_once(context, places):
+    client, fake = client_with(
+        FakeResp(200, {"features": []}), FakeResp(503),
+        FakeResp(200, {"features": []}), FakeResp(503),
+    )
+    context.routes_client = client
+    context.session.places = dict(places)
+
+    payload, attempts = _call_routes_with_policy(context, ["A", "B"])
+
+    assert payload["status"] == "error"
+    assert (payload["error_code"], payload["retryable"]) == ("UPSTREAM", True)
+    assert len(attempts) == 2 and len(fake.calls) == 4
+    assert context.session.routes == {}

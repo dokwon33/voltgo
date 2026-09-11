@@ -288,10 +288,10 @@ def get_walking_routes(runtime: ToolRuntime, poi_ids: list[str]) -> dict:
         s.warnings.append(f"경로 조회 실패로 제외된 후보: {', '.join(failed_ids)}")
 
     if not ok:
-        # UPSTREAM timeout/5xx를 ROUTE_PARSE로 덮어쓰면 middleware 재시도가 사라진다.
-        first_error = failed[0][1]
-        return tool_error(first_error.code, "모든 후보의 경로 조회에 실패했습니다",
-                          retryable=first_error.retryable)
+        # 앞선 후보가 파싱 실패여도 다른 후보의 일시 오류를 보존해 middleware가 재시도하게 한다.
+        error = next((e for _, e in failed if e.retryable), failed[0][1])
+        return tool_error(error.code, "모든 후보의 경로 조회에 실패했습니다",
+                          retryable=error.retryable)
     status = "partial" if failed else "ok"
     return ToolResult(status=status, data=ok, source=ok[0].route_source,
                       message=f"성공 {len(ok)}개, 실패 {len(failed)}개").dump()
