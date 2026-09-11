@@ -44,11 +44,15 @@ def calculate_time_budget(
     # 1. 충전 중이 아니거나 이미 목표에 도달 -> 외출 계획 없음 (C003)
     if snapshot.charging is False:
         return None, "NOT_CHARGING"
+    if snapshot.target_soc_pct is None:
+        return None, "NEED_INPUT"     # 목표를 모르면 비교/추정하지 않고 질문
     if snapshot.soc_pct is not None and snapshot.soc_pct >= snapshot.target_soc_pct:
         return None, "TARGET_REACHED"
 
     # 2. 너무 오래된 값이면 다시 조회하라고 알려준다
-    if (now - snapshot.observed_at).total_seconds() > STALE_AFTER_SEC:
+    # fetched_at(우리가 조회한 시각) 있으면 그걸로, 없으면 observed_at(차량 전송 시각)로 대체
+    freshness_ref = snapshot.fetched_at or snapshot.observed_at
+    if (now - freshness_ref).total_seconds() > STALE_AFTER_SEC:
         return None, "STALE_DATA"
 
     # 3. 잔여시간: API 가 준 값 우선, 없으면 단순 추정

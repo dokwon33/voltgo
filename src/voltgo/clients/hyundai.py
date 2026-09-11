@@ -37,7 +37,8 @@ def parse_timestamp(value: str) -> datetime:
 
 def parse_charging_response(raw: dict, source: str = "hyundai",
                             capacity_kwh: Optional[float] = None,
-                            avg_power_kw: Optional[float] = None) -> ChargingSnapshot:
+                            avg_power_kw: Optional[float] = None,
+                            fetched_at: Optional[datetime] = None) -> ChargingSnapshot:
     """
     현대차 원문 필드 -> ChargingSnapshot 어댑터 (API규격_검토 §1.1)
     Mock 도 원문 필드명을 그대로 쓰기 때문에 같은 함수를 쓴다.
@@ -60,16 +61,24 @@ def parse_charging_response(raw: dict, source: str = "hyundai",
         remaining_sec = int(round(float(remain["value"]) * UNIT_TO_SEC[unit]))
 
     plug_type = PLUG_TYPE.get(plugin, "none")
+    target_val = float(target) if target is not None else None
+    # 값을 호출자가 직접 줬으면 manual, 아니면 정책값(실제 출처 모름)이라 unknown
+    capacity_source = "manual" if capacity_kwh is not None else "unknown"
+    avg_power_source = "manual" if avg_power_kw is not None else "unknown"
 
     return ChargingSnapshot(
         charging=charging,
         soc_pct=float(soc) if soc is not None else None,
-        target_soc_pct=float(target) if target is not None else 80,
+        target_soc_pct=target_val,           # 계산 경로(model_copy)에서 덮어쓸 수 있음
+        reported_target_soc_pct=target_val,  # API 원문 그대로, 이후 안 덮어씀 (2.4/2.5.2)
         capacity_kwh=capacity_kwh if capacity_kwh is not None else DEFAULT_CAPACITY_KWH,
+        capacity_source=capacity_source,
         avg_power_kw=avg_power_kw if avg_power_kw is not None else DEFAULT_POWER_KW[plug_type],
+        avg_power_source=avg_power_source,
         reported_remaining_sec=remaining_sec,
         plug_type=plug_type,
         observed_at=parse_timestamp(raw["timestamp"]),
+        fetched_at=fetched_at,
         source=source,
     )
 
@@ -106,4 +115,4 @@ class HyundaiClient:
         return body
 
     def get_charging_status(self) -> ChargingSnapshot:
-        return parse_charging_response(self.fetch_raw(), source="hyundai")
+        return parse_charging_response(self.fetch_raw(), source="hyundai", fetched_at=datetime.now(KST))

@@ -47,6 +47,12 @@ def test_c004_missing_values_need_input(snapshot, now):
     assert estimate_remaining_sec(40, 80, 60, 0) is None
 
 
+def test_missing_target_needs_input(snapshot, now):
+    # 목표 SoC 가 아예 없으면 (API 도 못 주고 사용자도 말 안 함) 비교/추정 없이 NEED_INPUT
+    snap = snapshot.model_copy(update={"target_soc_pct": None})
+    assert calculate_time_budget(snap, now) == (None, "NEED_INPUT")
+
+
 def test_stale_snapshot(snapshot, now):
     # 61초 지난 값은 다시 조회하라고 한다
     assert calculate_time_budget(snapshot, now + timedelta(seconds=61)) == (None, "STALE_DATA")
