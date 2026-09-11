@@ -207,6 +207,45 @@ def test_find_station_multiple_asks_then_select(context):
     assert s.station_candidates == {}
 
 
+class FailingPlaces:
+    """find_station 이 항상 API 오류"""
+
+    def find_station(self, keyword):
+        raise ClientError("UPSTREAM", "timeout", retryable=True)
+
+
+@pytest.mark.parametrize("fail", ["empty", "api_error"])
+def test_failed_new_search_drops_old_candidates(context, fail):
+    # PR #2 리뷰: 역삼역 후보(S1·S2) -> 다른 충전소 검색 실패 -> S1 선택 은 거절돼야 한다
+    s = context.session
+    s.origin = None
+    r = tools.find_station.func(rt(context), keyword="역삼역")
+    assert set(s.station_candidates) == {"S1", "S2"}
+
+    if fail == "api_error":
+        context.places_client = FailingPlaces()
+        r = tools.find_station.func(rt(context), keyword="판교 충전소")
+        assert r["error_code"] == "UPSTREAM"
+    else:
+        r = tools.find_station.func(rt(context), keyword="없는충전소")
+        assert r["error_code"] == "NEED_INPUT"
+    assert s.station_candidates == {}
+
+    r = tools.find_station.func(rt(context), keyword="역삼역", station_id="S1")
+    assert r["error_code"] == "PRECONDITION_FAILED"
+    assert s.origin is None
+
+
+def test_new_multi_search_replaces_candidates(context):
+    s = context.session
+    s.origin = None
+    tools.find_station.func(rt(context), keyword="역삼역")            # S1, S2
+    tools.find_station.func(rt(context), keyword="EV충전소")          # S1, S2, S3 (새 목록)
+    assert set(s.station_candidates) == {"S1", "S2", "S3"}
+    r = tools.find_station.func(rt(context), keyword="EV충전소", station_id="S3")
+    assert r["status"] == "ok" and s.origin.poi_id == "S3"
+
+
 def test_find_station_single_sets_origin(context):
     context.session.origin = None
     r = tools.find_station.func(rt(context), keyword="강남역 EV충전소")

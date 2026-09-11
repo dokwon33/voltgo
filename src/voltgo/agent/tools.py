@@ -162,6 +162,9 @@ def find_station(runtime: ToolRuntime, keyword: str, station_id: Optional[str] =
         _set_origin(s, picked)
         return ToolResult(status="ok", data=picked, source=picked.source, message=f"출발지 설정: {picked.name}").dump()
 
+    # 새 검색을 시작하면 이전 후보는 무효. 결과 없음·API 오류로 끝나도 옛 station_id 가 선택되면 안 된다
+    s.station_candidates = {}
+
     if not keyword.strip():
         return tool_error("NEED_INPUT", "충전소 이름이 비어 있습니다. 사용자에게 충전소 이름을 물어보세요.")
     if ctx.places_client is None:
