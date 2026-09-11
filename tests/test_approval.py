@@ -245,3 +245,34 @@ def test_읽기_도구만_제안되면_승인_시각을_기록하지_않는다(c
         {"name": "search_nearby_places", "args": {"category": "meal"}, "id": "t1", "type": "tool_call"}])]}
     mark_approval_requested.after_model(state, _RT(context))
     assert context.session.approval_requested_at is None
+
+
+# ================================================================
+# 확정 재검증이 추천보다 관대해지면 안 된다 (목표 SoC 불일치, C028 연계)
+# ================================================================
+def test_사용자_목표가_차량_목표보다_낮으면_재검증도_원문_잔여시간을_쓰지_않는다(context):
+    version = _plan_ready(context)
+    s = context.session
+    base = context.clock()
+    # 차량은 100% 까지 충전하도록 설정(원문 잔여 60분), 사용자 목표는 80%
+    s.charging = s.charging.model_copy(update={"reported_target_soc_pct": 100, "reported_remaining_sec": 3600})
+    context.charging_provider = None          # 재검증 때 새로 조회하지 않고 위 상태를 쓰게 한다
+
+    r = tools.confirm_plan.func(_RT(context), plan_id="A", version=version)
+    assert r["status"] == "ok"
+    # 추정 경로: (80-40)% x 60kWh / 48kW = 30분 -> 완료 14:30, 버퍼 5분 -> 마감 14:25
+    assert s.time_budget.return_deadline == base + timedelta(minutes=25), \
+        "원문 잔여시간(100% 기준 60분)으로 마감이 14:55 처럼 늘어나면 안 된다"
+
+
+def test_사용자_목표가_차량_목표보다_높으면_차량_목표에서_멈추는_것으로_재검증한다(context):
+    version = _plan_ready(context)
+    s = context.session
+    s.charging = s.charging.model_copy(update={"reported_target_soc_pct": 80, "reported_remaining_sec": 1800})
+    s.target_soc_pct = 100
+    context.charging_provider = None
+
+    r = tools.confirm_plan.func(_RT(context), plan_id="A", version=version)
+    assert r["status"] == "ok"
+    assert s.time_budget.finish_at == context.clock() + timedelta(seconds=1800), \
+        "차량은 80% 에서 멈추므로 원문 잔여 30분 기준이어야 한다"
