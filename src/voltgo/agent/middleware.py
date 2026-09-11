@@ -95,6 +95,10 @@ def model_budget(request, handler):
         return handler(request)
     except Exception as e:
         if type(e).__name__ in RETRYABLE_ERRORS:
+            # 재시도도 실제 모델 호출이다. 남은 여력이 없으면 한도를 넘기지 않는다.
+            if s.counters["model"] + 1 > MAX_MODEL_CALLS:
+                print(f"### model_budget : 일시 오류({type(e).__name__}) - 재시도 여력 없음")
+                raise RuntimeError("MODEL_BUDGET_EXCEEDED")
             print(f"### model_budget : 일시 오류({type(e).__name__}) - 1회 재시도")
             s.counters["model"] += 1
             return handler(request)

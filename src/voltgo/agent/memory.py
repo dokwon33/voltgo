@@ -4,6 +4,7 @@
 노트북 [5] 4장은 InMemoryStore 를 썼는데, 프로세스가 죽으면 날아간다.
 설계서대로 user_id 별 로컬 JSON 파일에 저장한다. data/prefs/ 는 git 에서 제외.
 """
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -15,8 +16,16 @@ PREF_DIR = Path(__file__).resolve().parents[3] / "data" / "prefs"
 
 
 def _path(user_id: str) -> Path:
-    safe = "".join(ch for ch in user_id if ch.isalnum() or ch in "-_")   # 경로 조작 방지
-    return PREF_DIR / f"{safe}.json"
+    """사용자별 선호 파일 경로.
+
+    글자만 걸러내면 "a.b" 와 "ab" 가 같은 파일이 된다(다른 사용자의 선호를 읽게 됨).
+    읽기 쉬운 접두사 + 전체 ID 해시로 서로 다른 ID 가 절대 겹치지 않게 한다.
+    """
+    if not user_id:
+        raise ValueError("user_id 가 비어 있다")
+    safe = "".join(ch for ch in user_id if ch.isalnum() or ch in "-_")[:40] or "user"
+    digest = hashlib.sha256(user_id.encode("utf-8")).hexdigest()[:12]
+    return PREF_DIR / f"{safe}-{digest}.json"
 
 
 def load_preferences(user_id: str) -> Optional[PreferenceRecord]:
@@ -25,9 +34,12 @@ def load_preferences(user_id: str) -> Optional[PreferenceRecord]:
         return None
     try:
         with open(p, encoding="utf-8") as f:
-            return PreferenceRecord.model_validate(json.load(f))
+            record = PreferenceRecord.model_validate(json.load(f))
     except Exception:
         return None          # 깨진 파일은 없는 걸로 (기본값 사용)
+    if record.user_id != user_id:
+        return None          # 파일 안의 소유자가 다르면 남의 기록이다
+    return record
 
 
 def save_preferences(record: PreferenceRecord) -> None:
