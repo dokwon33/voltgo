@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Optional
 
 from voltgo.agent.schemas import (
-    CandidatePlan, ChargingSnapshot, ConfirmedPlan, Origin, Place, RoundTrip, TimeBudget,
+    CandidatePlan, ChargingSnapshot, ConfirmedPlan, Origin, Place, RoundTrip, StationCandidate, TimeBudget,
 )
 
 # KST는 UTC+9  (노트북 [4] get_current_time 과 동일)
@@ -26,6 +26,7 @@ class Session:
     """Tool 이 기록하고 다음 Tool 과 출력 조립기가 읽는 값들"""
     charging: Optional[ChargingSnapshot] = None
     origin: Optional[Origin] = None
+    station_candidates: dict[str, StationCandidate] = field(default_factory=dict)  # poi_id -> 선택 대기 중인 충전소 후보
     time_budget: Optional[TimeBudget] = None
     places: dict[str, Place] = field(default_factory=dict)        # poi_id -> Place
     routes: dict[str, RoundTrip] = field(default_factory=dict)    # poi_id -> RoundTrip
