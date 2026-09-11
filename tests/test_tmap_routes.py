@@ -3,8 +3,11 @@ import json
 from types import SimpleNamespace
 
 import pytest
+import requests
+from langchain.messages import ToolMessage
 
 from voltgo.agent import tools
+from voltgo.agent.middleware import tool_policy
 from voltgo.agent.schemas import Place
 from voltgo.clients import ClientError
 from voltgo.clients.tmap_base import TmapHttp
@@ -165,3 +168,42 @@ def test_c010_inbound_failure_drops_only_that_candidate(context, budget):
     context.session.time_budget = budget
     plans = tools.select_feasible_plans.func(rt(context), dwell_min=5)
     assert [plan["poi_id"] for plan in plans["data"]] == ["B"]
+
+
+@pytest.mark.parametrize("first_response", [FakeResp(503), requests.Timeout()])
+def test_retryable_route_error_is_preserved_and_middleware_retries(context, first_response):
+    client, fake = client_with(
+        first_response,
+        FakeResp(200, leg(240, 300)),
+        FakeResp(200, leg(300, 350)),
+    )
+    context.routes_client = client
+    context.session.places = {"A": place("A", "후보A", 37.502, 127.038)}
+    request = SimpleNamespace(
+        tool_call={"id": "route-call", "name": "get_walking_routes", "args": {"poi_ids": ["A"]}},
+        runtime=rt(context),
+    )
+    handler_calls = 0
+    handler_payloads = []
+
+    def handler(_request):
+        nonlocal handler_calls
+        handler_calls += 1
+        result = tools.get_walking_routes.func(rt(context), poi_ids=["A"])
+        handler_payloads.append(result)
+        return ToolMessage(
+            content=json.dumps(result),
+            tool_call_id="route-call",
+            name="get_walking_routes",
+        )
+
+    result = tool_policy.wrap_tool_call(request, handler)
+    payload = json.loads(result.content)
+
+    assert handler_calls == 2
+    assert handler_payloads[0]["status"] == "error"
+    assert handler_payloads[0]["error_code"] == "UPSTREAM"
+    assert handler_payloads[0]["retryable"] is True
+    assert len(fake.calls) == 3                  # 첫 실패 1회 + 재시도 왕복 2회
+    assert payload["status"] == "ok"
+    assert [route["poi_id"] for route in payload["data"]] == ["A"]

@@ -252,12 +252,23 @@ def get_walking_routes(runtime: ToolRuntime, poi_ids: list[str]) -> dict:
     unknown = [p for p in poi_ids if p not in s.places]
     if unknown:
         return tool_error("PRECONDITION_FAILED", f"등록되지 않은 poi_id: {unknown}")
+    poi_ids = list(dict.fromkeys(poi_ids))[:MAX_ROUTE_CANDIDATES]
+    if not poi_ids:
+        return tool_error("PRECONDITION_FAILED", "경로를 조회할 poi_id가 없습니다")
+
+    # 경로가 갱신되면 이전 경로로 만든 후보와 확정은 더 이상 유효하지 않다.
+    if s.candidates or s.confirmed or s.confirmed_by_request:
+        s.bump_version()
+    s.candidates = {}
+    s.confirmed = None
+    s.confirmed_by_request = {}
+    s.selected_ran = False
+
+    # 같은 ID를 중복 호출하지 않고, 이번 조회 결과만 다음 판정에 사용한다.
+    s.routes = {}
     if ctx.routes_client is None:
         return tool_error("AUTH_ERROR", "경로 API 설정이 없습니다")
 
-    # 같은 ID를 중복 호출하지 않고, 이번 조회 결과만 다음 판정에 사용한다.
-    poi_ids = list(dict.fromkeys(poi_ids))[:MAX_ROUTE_CANDIDATES]
-    s.routes = {}
     ok, failed = [], []
     for pid in poi_ids:
         try:
@@ -265,7 +276,7 @@ def get_walking_routes(runtime: ToolRuntime, poi_ids: list[str]) -> dict:
             s.routes[pid] = trip
             ok.append(trip)
         except ClientError as e:
-            failed.append(pid)               # 한 방향만 실패해도 후보 제외 (편도 x2 금지)
+            failed.append((pid, e))           # 한 방향만 실패해도 후보 제외 (편도 x2 금지)
             if e.code in ("AUTH_ERROR", "RATE_LIMIT"):
                 return tool_error(e.code, str(e), retryable=e.retryable)
         s.counters["api"] += 2
@@ -273,10 +284,14 @@ def get_walking_routes(runtime: ToolRuntime, poi_ids: list[str]) -> dict:
     if ok and ok[0].route_source == "mock":
         s.warnings.append("보행 경로는 Mock 데이터입니다")
     if failed:
-        s.warnings.append(f"경로 조회 실패로 제외된 후보: {', '.join(failed)}")
+        failed_ids = [pid for pid, _ in failed]
+        s.warnings.append(f"경로 조회 실패로 제외된 후보: {', '.join(failed_ids)}")
 
     if not ok:
-        return tool_error("ROUTE_PARSE", "모든 후보의 경로 조회에 실패했습니다")
+        # UPSTREAM timeout/5xx를 ROUTE_PARSE로 덮어쓰면 middleware 재시도가 사라진다.
+        first_error = failed[0][1]
+        return tool_error(first_error.code, "모든 후보의 경로 조회에 실패했습니다",
+                          retryable=first_error.retryable)
     status = "partial" if failed else "ok"
     return ToolResult(status=status, data=ok, source=ok[0].route_source,
                       message=f"성공 {len(ok)}개, 실패 {len(failed)}개").dump()
