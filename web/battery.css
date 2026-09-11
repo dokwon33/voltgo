@@ -1,0 +1,34 @@
+/* Slim battery outline; color indicates level independently of charging state. */
+.battery-summary {
+  --battery-dark: #41785c; --battery-mid: #79ae8c; --battery-light: #a1cbb0;
+  padding: 4px 8px 4px 4px;
+}
+.battery-summary[data-level="low"] { --battery-dark: #aa6157; --battery-mid: #cf9285; --battery-light: #e3b1a4; }
+.battery-summary[data-level="medium"] { --battery-dark: #927341; --battery-mid: #c5a56b; --battery-light: #dcc392; }
+.battery-summary[data-level="unknown"] { --battery-dark: #78857d; --battery-mid: #a9b6ae; --battery-light: #c4cec7; }
+.battery-label { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 9px; }
+.battery-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 3px 9px; }
+.battery-title { font-family: var(--ui); font-size: 12px; font-weight: 400; color: #65746a; letter-spacing: -.015em; }
+.battery-reading { color: #364e3f; }
+.battery-reading b { font-family: var(--logo); font-size: 20px; font-weight: 800; line-height: 1; letter-spacing: -.6px; }
+.battery-case { position: relative; padding: 3px; border: 1px solid #c9d5cd; border-radius: 7px;
+  background: rgba(255,255,255,.35); box-shadow: 0 1px 2px rgba(51,77,60,.035); }
+.battery-case::before { content: ''; position: absolute; right: -4px; top: 50%; transform: translateY(-50%);
+  width: 3px; height: 8px; border-radius: 0 2px 2px 0; background: #b7c5bc; }
+.battery-track { position: relative; height: 12px; overflow: hidden; border-radius: 3px; background: #e5ece7; }
+.battery-fill { position: absolute; inset: 0 auto 0 0; display: block; width: 0; height: 100%; border-radius: 3px;
+  background: linear-gradient(90deg, var(--battery-mid), var(--battery-light)); transition: width .5s ease; }
+.battery-gloss { position: absolute; pointer-events: none; inset: 0; overflow: hidden; }
+.battery-target { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px dashed rgba(65, 87, 73, .55); transform: translateX(-1px); pointer-events: none; }
+.battery-estimate { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 3px 12px; margin: 7px 0 0; color: #536d5c; font-size: 12px; line-height: 1.5; }
+.battery-estimate span:last-child { color: #78867d; }
+.battery-gloss::after { content: ''; position: absolute; inset: 0; transform: translateX(-110%); opacity: 0;
+  background: linear-gradient(110deg, transparent 30%, rgba(255,255,255,.22) 50%, transparent 70%); }
+[data-charging="active"] .battery-gloss::after { animation: battery-shine 4s ease-in-out infinite; }
+.battery-status { display: inline-flex; align-items: center; gap: 4px; color: #7b8780; font-family: var(--ui); font-size: 11px; line-height: 1.6; }
+.battery-summary[data-charging="active"] .battery-status { color: #4d8060; }
+.battery-status svg { display: none; width: 11px; height: 11px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+[data-charging="active"] .battery-icon-active, [data-charging="idle"] .battery-icon-idle, [data-charging="unknown"] .battery-icon-unknown { display: block; }
+.battery-caption { margin: 0; color: var(--battery-dark); font-family: var(--ui); font-size: 11px; line-height: 1.6; letter-spacing: -.015em; }
+@keyframes battery-shine { 0%, 15% { transform: translateX(-110%); opacity: 0; } 35% { opacity: 1; } 85%, 100% { transform: translateX(110%); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .battery-fill { transition: none; } [data-charging="active"] .battery-gloss::after { animation: none; } }

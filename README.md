@@ -140,7 +140,9 @@ voltgo/
 │       └── agent.py          #   create_agent 조립, ask() / decide()
 ├── scripts/
 │   ├── demo.py               # CLI 시연 (대화형, 승인 프롬프트 포함)
-│   └── probe_tmap_places.py  # TMAP 장소 API 실호출 확인 (원문은 data/raw/tmap/)
+│   ├── probe_tmap_places.py  # TMAP 장소 API 실호출 확인 (원문은 data/raw/tmap/)
+│   └── web.py                # 웹 화면 서버 (표준 http.server, demo.py 와 같은 ask/decide)
+├── web/                      # 웹 화면, 대화·지도·기록 스크립트, 스타일·캐릭터
 ├── tests/                    # pytest (계산·선별·어댑터·도구 흐름·출력 조립)
 ├── notebooks/                # 탐색/실험
 ├── docs/                     # 설계서·발표본
@@ -192,6 +194,45 @@ python scripts/demo.py --fixed   # 14:00 고정 시계 (설계서 C001 조건)
 질문: 1번으로 확정할게          → 최신 조건으로 재검증 후 확정 또는 재계획
 질문: 카페를 선호해. 다음에도 기억해줘   → [승인 요청] approve / reject
 ```
+
+### 웹 화면
+
+```bash
+python scripts/web.py            # http://localhost:8000
+python scripts/web.py --fixed    # 14:00 고정 시계 (설계서 C001 조건)
+```
+
+`scripts/demo.py`와 같은 `ask()` / `decide()`를 표준 `http.server`로 감싼 웹 화면입니다.
+프로젝트 의존성을 설치한 가상환경에서 실행하세요. 예: `.venv/bin/python scripts/web.py`.
+`web/index.html`이 화면, `app.js`가 대화 흐름, `features.js`가 기록·조건·선호 UI를 담당합니다.
+
+| 화면 | 기능 |
+| --- | --- |
+| 홈 | 볼티, 얇은 배터리 게이지, 충전 상태·목표·완료 예상, 활동 선택, 대화 기록 |
+| 차량 아이콘 | 충전 상세·측정/조회 시각·계산 출처, 충전 정보 강제 새로고침 |
+| 대화 | 추천 카드, 왕복 상세, 조건 편집, 충전소 후보 선택, 지난 추천 비활성화 |
+| 확정한 목적지 | 목적지 이름·지도 버튼 강조, 목적지 유지·다른 후보 선택·조건별 재검색 |
+| 내 취향 | 저장된 선호 조회·변경·삭제, 실제 저장 내용과 120초 승인 만료 표시 |
+| 대화 기록 | 이 브라우저에 최근 20개 보관, 새 대화, 살아 있는 서버 thread 재개, 과거 기록 조회 |
+| 지도 | 출발지·장소 마커, 가는 길/오는 길. 브라우저 지도 키 및 실제 경로 좌표 필요 |
+
+| API | 내용 |
+| --- | --- |
+| `GET /api/health` | 충전·TMAP 모드, 시계, 모델, user_id, 서버 instance_id |
+| `GET /api/session?thread_id=` | 차량·계산 목표·조건·현재 후보·선호·대기 승인·map_data |
+| `GET /api/session?existing=1&thread_id=` | 이미 존재하는 대화인지 조회. 없는 thread를 만들지 않음 |
+| `POST /api/ask` | `{thread_id, instance_id, text, selection?}`. 선택한 후보 ID·버전·생성시각 검증 |
+| `POST /api/decide` | `{thread_id, instance_id, decision, request_id}`. approve/reject 재전송 중복 방지 |
+| `POST /api/refresh` | `{thread_id, instance_id}`. 강제 충전 조회, 이전 추천 무효화 |
+
+[프론트 반영 결과와 팀에 보낼 요청](docs/frontend-handoff.md),
+[지도 데이터 계약](docs/map-frontend-contract.md), [배터리 표시 기준](docs/battery-ui.md).
+서버 재시작을 넘는 대화 재개와 수동 잔여시간 입력은 추가 백엔드 연결이 필요합니다.
+웹 서버 코드를 업데이트한 뒤에는 실행 중인 Python 서버도 재시작하세요.
+
+지도 키는 `.env`의 `TMAP_MAP_APP_KEY`에 설정합니다. 웹 서버가 `/map-config.js`에
+이 값만 전달하며, 브라우저에서 공개되는 키입니다. 장소·경로 조회용 `TMAP_APP_KEY`는
+자동으로 공개하지 않습니다. 현재 접속자 격리는 별도 통합 작업 중이며, 웹은 한 사용자 ID를 공유합니다.
 
 ### 실행 모드
 

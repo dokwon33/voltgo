@@ -51,6 +51,25 @@ def test_c001_happy_path_and_confirm(context):
     assert again["message"] == "이미 확정된 계획"
 
 
+def test_switch_destination_back_rechecks_and_updates_current_plan(context, now):
+    tools.get_charging_status.func(rt(context))
+    tools.calculate_time_budget.func(rt(context), user_limit_min=30)
+    tools.search_nearby_places.func(rt(context), category="meal")
+    tools.get_walking_routes.func(rt(context), poi_ids=["A", "B"])
+    tools.select_feasible_plans.func(rt(context), dwell_min=12)
+    version = context.session.condition_version
+    for plan_id in ("A", "B"):
+        assert tools.confirm_plan.func(rt(context), plan_id=plan_id, version=version)["status"] == "ok"
+        assert context.session.confirmed.plan_id == plan_id
+    context.clock = lambda: now + timedelta(minutes=1)
+    result = tools.confirm_plan.func(rt(context), plan_id="A", version=version)
+    assert result["status"] == "ok"
+    assert context.session.confirmed.plan_id == "A"
+    assert context.session.confirmed.confirmed_at == context.clock()
+    again = tools.confirm_plan.func(rt(context), plan_id="A", version=version)
+    assert again["message"] == "이미 확정된 계획"
+
+
 def test_c013_dwell_change_bumps_version_and_drops_approval(context):
     tools.get_charging_status.func(rt(context))
     tools.calculate_time_budget.func(rt(context), user_limit_min=30)

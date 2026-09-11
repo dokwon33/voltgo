@@ -1,0 +1,423 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>VoltGo</title>
+<link rel="stylesheet" href="map.css">
+<link rel="stylesheet" href="volty.css">
+<link rel="preload" href="fonts/gowun-dodum.woff2" as="font" type="font/woff2" crossorigin>
+<style>
+  @font-face { font-family: 'Gowun Dodum'; font-style: normal; font-weight: 400; font-display: swap; src: url('fonts/gowun-dodum.woff2') format('woff2'); }
+  @font-face { font-family: 'Nunito'; font-style: normal; font-weight: 800; font-display: swap; src: url('fonts/nunito-800.woff2') format('woff2'); }
+  @font-face { font-family: 'Nunito'; font-style: normal; font-weight: 900; font-display: swap; src: url('fonts/nunito-900.woff2') format('woff2'); }
+  :root {
+    color-scheme: light;
+    --bg: #F4F9F5; --paper: #FFFFFF; --soft: #EAF5EE; --line: #DCE9E0;
+    --ink: #1B2620; --ink-2: #55685E; --ink-3: #8A9B91;
+    --green: #3DB273; --deep: #2A8A57; --mint: #BFF0D5; --lime: #9BDC5B; --glow: rgba(120, 230, 170, .38);
+    --amber: #B9801A; --amber-soft: #FFF3DA; --red: #C4503E;
+    --me: #1B2620; --me-ink: #F4F9F5;
+    --shadow: 0 12px 32px rgba(40, 90, 60, .10);
+    --ui: "Gowun Dodum", "Apple SD Gothic Neo", system-ui, sans-serif;
+    --voice: "Gowun Dodum", "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif;
+    --logo: "Nunito", system-ui, sans-serif;
+    --hand: "Gowun Dodum", "Apple SD Gothic Neo", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  img { max-width: 100%; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--ui); font-size: 15px; line-height: 1.5;
+         font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased; }
+  button { font: inherit; cursor: pointer; color: inherit; }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+
+  /* 화면 한 장 = 휴대폰 한 화면. 넓은 화면에서는 가운데 세로로 */
+  .phone { max-width: 430px; margin: 0 auto; min-height: 100vh; display: flex; flex-direction: column; background: var(--bg); }
+  @media (min-width: 600px) {
+    body { background: radial-gradient(60% 40% at 50% 0%, var(--soft), var(--bg) 70%); }
+    .phone { border-inline: 1px solid var(--line); }
+  }
+
+  .bar { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px 6px; }
+  .wordmark { font-family: var(--logo); font-weight: 900; font-size: 24px; letter-spacing: -.4px; display: inline-flex; align-items: center; line-height: 1; }
+  .wordmark b { color: var(--green); }
+  .wordmark svg { width: 13px; height: 17px; margin: -8px 0 0 1px; }
+  .bar-right { display: flex; gap: 6px; }
+  .bar { gap: 6px; }
+  .bar .wordmark { margin-right: auto; }
+  @media (max-width: 360px) {
+    .bar { padding-inline: 12px; gap: 4px; }
+    .bar .wordmark { font-size: 20px; }
+    .bar-right { gap: 4px; }
+    .bar .icon-btn { width: 30px; height: 30px; flex: none; }
+    .bar .text-btn { font-size: 12px; padding-inline: 2px; }
+  }
+  .icon-btn { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line); background: var(--paper); display: grid; place-content: center; padding: 0; }
+  .icon-btn svg { width: 16px; height: 16px; stroke: var(--ink-2); fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  #backBtn { background: transparent; border-color: #D8DDDA; box-shadow: none; }
+  #backBtn svg { stroke: #68756D; }
+  #backBtn:hover { border-color: #BCC5BF; }
+  .text-btn { border: 0; background: none; color: var(--ink-3); font-size: 13px; padding: 4px 6px; }
+
+  /* ---------- 홈 ---------- */
+  .home { flex: 1; padding: 6px 20px 24px; display: flex; flex-direction: column; gap: 18px; }
+  .hero { display: flex; flex-direction: column; align-items: center; text-align: center; padding-top: 6px; }
+  .volty { width: 240px; display: block; filter: drop-shadow(0 22px 26px var(--glow)); transform-origin: 50% 82%; }
+  @keyframes pop { from { transform: scale(.5) rotate(-10deg); opacity: 0; } to { transform: none; opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .sheet .volty { animation: none; } }
+  .hero-say { position: relative; margin-top: 10px; background: var(--paper); border-radius: 20px; padding: 12px 18px;
+              font-family: var(--voice); font-size: 16px; line-height: 1.6; color: var(--ink); box-shadow: var(--shadow); text-wrap: balance; word-break: keep-all; }
+  .hero-say::before { content: ""; position: absolute; top: -8px; left: calc(50% - 8px); width: 16px; height: 16px; background: var(--paper); transform: rotate(45deg); border-radius: 3px; }
+  .hand { margin: 12px 0 0; font-family: var(--hand); font-size: 14px; color: var(--ink-2); letter-spacing: -.02em; }
+
+  .car { background: var(--paper); border-radius: 20px; padding: 14px 16px; box-shadow: var(--shadow); }
+  .car-main { display: flex; align-items: center; gap: 14px; }
+  .car-times { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line); }
+  .car-times span { display: block; font-size: 12px; color: var(--ink-2); }
+  .car-times b { font-size: 21px; font-weight: 700; }
+  .car-dialog { border: 0; padding: 0; width: min(430px, calc(100% - 24px)); border-radius: 24px; background: var(--paper); color: var(--ink); }
+  .car-dialog::backdrop { background: rgba(27, 38, 32, .3); backdrop-filter: blur(5px); }
+  .car-dialog .sheet { border-radius: 24px; padding: 22px; box-shadow: none; }
+  .car-dialog .car { width: 100%; text-align: left; padding: 10px 0; box-shadow: none; }
+  .ring { --soc: 0; flex: none; width: 66px; aspect-ratio: 1; border-radius: 50%; position: relative;
+          background: conic-gradient(var(--battery-ring, var(--green)) calc(var(--soc) * 1%), var(--soft) 0); }
+  .ring::before { content: ""; position: absolute; inset: 7px; border-radius: 50%; background: var(--paper); }
+  .ring b { position: absolute; inset: 0; display: grid; place-content: center; font-size: 16px; font-weight: 700; }
+  .car-text { display: flex; flex-direction: column; min-width: 0; }
+  .car-text b { font-size: 16px; font-weight: 700; }
+  .car-text span { font-size: 13px; color: var(--ink-2); }
+
+  .ask { margin: 4px 0 -6px; font-family: var(--voice); font-weight: 400; font-size: 18px; }
+  .intents { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .intents button { display: flex; align-items: center; gap: 10px; border: 0; background: var(--paper); border-radius: 18px; padding: 14px 14px;
+                    font-size: 15px; font-weight: 500; box-shadow: 0 4px 14px rgba(40, 90, 60, .06); text-align: left; }
+  .intents button:active { transform: scale(.98); }
+  .intents i { flex: none; width: 36px; height: 36px; border-radius: 12px; background: var(--soft); display: grid; place-content: center; }
+  .intents svg { width: 20px; height: 20px; fill: none; stroke: var(--deep); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* ---------- 대화 ---------- */
+  .chat { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .chat-top { display: flex; align-items: center; gap: 12px; padding: 4px 20px 12px; border-bottom: 1px solid var(--line); }
+  .mini-volty { flex: none; width: 58px; height: 58px; object-fit: contain; filter: drop-shadow(0 6px 10px var(--glow)); }
+  .mood { margin: 0; font-family: var(--voice); font-size: 15px; line-height: 1.35; }
+  .times { margin: 3px 0 0; font-size: 12.5px; color: var(--ink-2); display: flex; gap: 10px; flex-wrap: wrap; }
+  .times b { color: var(--ink); font-weight: 700; }
+
+  .messages { flex: 1; overflow-y: auto; padding: 16px 20px 8px; display: flex; flex-direction: column; gap: 14px; scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { .messages { scroll-behavior: auto; } }
+  .row { display: flex; gap: 8px; max-width: 94%; }
+  .row.me { align-self: flex-end; }
+  .row .mini { flex: none; width: 36px; height: 36px; object-fit: contain; margin-top: 0; }
+  .col { display: flex; flex-direction: column; gap: 8px; min-width: 0; flex: 1; }
+  .say { border-radius: 18px; padding: 10px 14px; background: var(--paper); box-shadow: 0 2px 10px rgba(40, 90, 60, .05); }
+  .row.bot .say { border-top-left-radius: 6px; font-family: var(--voice); font-size: 15.5px; }
+  .row.me .say { background: var(--me); color: var(--me-ink); border-bottom-right-radius: 6px; }
+  .say p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .say p + p { margin-top: 6px; }
+  .fine { margin: 0; font-size: 11.5px; color: var(--ink-3); padding-left: 4px; }
+  .typing { display: inline-flex; gap: 4px; padding: 6px 2px; }
+  .typing i { width: 6px; height: 6px; border-radius: 50%; background: var(--ink-3); animation: blink 1.2s infinite; }
+  .typing i:nth-child(2) { animation-delay: .2s; } .typing i:nth-child(3) { animation-delay: .4s; }
+  @keyframes blink { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .typing i { animation: none; opacity: .6; } }
+
+  /* 후보 = 다녀올 계획 한 장 */
+  .plan { background: var(--paper); border-radius: 18px; padding: 14px 16px; display: grid; gap: 8px; box-shadow: 0 2px 10px rgba(40, 90, 60, .05); }
+  .plan.done { box-shadow: 0 0 0 2px var(--green), 0 2px 10px rgba(40, 90, 60, .05); }
+  .plan-head { display: flex; align-items: center; gap: 8px; }
+  .plan-head .cat { font-size: 11.5px; color: var(--deep); background: var(--soft); padding: 2px 8px; border-radius: 999px; flex: none; }
+  .plan-head h4 { margin: 0; font-size: 17px; font-weight: 700; min-width: 0; overflow-wrap: anywhere; }
+  .plan-line { margin: 0; font-size: 14px; color: var(--ink-2); }
+  .plan-line b { color: var(--ink); font-weight: 700; }
+  .plan-line .slack { color: var(--deep); font-weight: 500; }
+  .tbar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--soft); }
+  .seg { min-width: 2px; }
+  .seg.out, .seg.in { background: var(--green); }
+  .seg.stay { background: var(--deep); }
+  .seg.slack { background: transparent; }
+  .plan-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 2px; }
+  .leave { font-size: 14px; color: var(--ink-2); }
+  .leave b { font-size: 18px; color: var(--ink); font-weight: 700; }
+  .pick { border: 0; background: var(--green); color: #fff; border-radius: 999px; padding: 8px 14px; font-weight: 500; font-size: 14px; }
+  .pick:active { transform: scale(.97); }
+  .done-tag { font-size: 13px; font-weight: 700; color: var(--deep); }
+  .plan-src { margin: 0; font-size: 11px; color: var(--ink-3); }
+
+  .arrival { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .arrival div { background: var(--soft); border-radius: 14px; padding: 10px 12px; }
+  .arrival span { display: block; font-size: 12px; color: var(--ink-2); }
+  .arrival b { font-size: 22px; font-weight: 700; }
+
+  .follow { display: flex; gap: 6px; flex-wrap: wrap; padding: 4px 20px 10px; }
+  .follow button { border: 1px solid var(--line); background: var(--paper); border-radius: 999px; padding: 6px 12px; font-size: 13px; color: var(--ink-2); }
+  .follow button:hover { border-color: var(--green); color: var(--deep); }
+
+  /* ---------- 입력 ---------- */
+  .composer { position: sticky; bottom: 0; display: flex; gap: 8px; padding: 10px 16px calc(14px + env(safe-area-inset-bottom));
+              background: linear-gradient(180deg, transparent, var(--bg) 30%); }
+  .composer input { flex: 1; min-width: 0; height: 48px; border: 1px solid var(--line); border-radius: 999px; padding: 0 18px; font: inherit;
+                    background: var(--paper); color: var(--ink); }
+  .composer input:disabled { opacity: .6; }
+  .composer button { flex: none; width: 48px; height: 48px; border-radius: 50%; border: 0; background: var(--green); display: grid; place-content: center; padding: 0; }
+  .composer button svg { width: 20px; height: 20px; fill: none; stroke: #fff; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+  .composer button:disabled { opacity: .4; cursor: default; }
+
+  /* ---------- 아래에서 올라오는 시트 (승인 / 정보) ---------- */
+  .scrim { position: fixed; inset: 0; background: rgba(228, 242, 233, .6); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); display: flex; align-items: flex-end; justify-content: center; z-index: 10; }
+  .sheet { width: 100%; max-width: 430px; background: var(--paper); border-radius: 24px 24px 0 0; padding: 22px 22px calc(22px + env(safe-area-inset-bottom));
+           display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px; box-shadow: 0 -10px 40px rgba(0, 0, 0, .15); }
+  .sheet .volty { width: 156px; margin: -100px 0 0; animation: pop .6s cubic-bezier(.2, 1.4, .4, 1) both; }
+  .sheet h3 { margin: 0; font-family: var(--voice); font-weight: 400; font-size: 20px; }
+  .sheet p { margin: 0; color: var(--ink-2); font-size: 14px; text-wrap: balance; }
+  .sheet-btns { display: flex; flex-direction: column; gap: 8px; width: 100%; margin-top: 10px; }
+  .sheet-btns button { border: 0; border-radius: 999px; padding: 13px; font-size: 15px; font-weight: 500; }
+  .sheet-btns .primary { background: var(--green); color: #fff; }
+  .sheet-btns .quiet { background: var(--soft); color: var(--ink-2); }
+  .info-list { width: 100%; display: grid; gap: 6px; text-align: left; margin-top: 4px; }
+  .info-list div { display: flex; justify-content: space-between; gap: 12px; font-size: 13.5px; border-bottom: 1px solid var(--line); padding: 6px 2px; }
+  .info-list span { color: var(--ink-3); flex: none; }
+  .info-list b { font-weight: 500; text-align: right; overflow-wrap: anywhere; }
+</style>
+<link rel="stylesheet" href="battery.css">
+<link rel="stylesheet" href="features.css">
+</head>
+<body>
+<div class="phone">
+  <header class="bar">
+    <button class="icon-btn" id="backBtn" type="button" aria-label="뒤로가기" hidden>
+      <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>
+    </button>
+    <button class="wordmark" id="brandHome" type="button" aria-label="VoltGo 홈으로">Volt<b>Go</b><svg viewBox="0 0 18 22" aria-hidden="true"><path d="M11 0 1 12h6l-2 10L17 8h-6z" fill="#9BDC5B"/></svg></button>
+    <div class="bar-right">
+      <button class="icon-btn" id="mapBtn" type="button" aria-label="추천 지도 보기" title="추천 지도">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 5 6-2 6 2 6-2v16l-6 2-6-2-6 2zM9 3v16M15 5v16"/></svg>
+      </button>
+      <button class="icon-btn" id="carBtn" type="button" aria-label="차량 상태 보기" title="차량 상태">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 10 2-6h10l2 6M5 10h14a2 2 0 0 1 2 2v6H3v-6a2 2 0 0 1 2-2ZM5 18v2M19 18v2M7 14h1M16 14h1"/></svg>
+      </button>
+      <button class="icon-btn" id="infoBtn" type="button" aria-label="실행 정보">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- 홈 : 볼티가 먼저 인사한다 -->
+  <section class="home" id="home">
+    <div class="hero">
+      <button class="volty greet" id="homeVolty" type="button" aria-label="볼티가 손을 흔들며 인사해요. 다시 인사하기" title="볼티를 누르면 다시 인사해요">
+        <span class="volty-ambient" aria-hidden="true">
+          <svg viewBox="0 0 480 480" focusable="false">
+            <defs>
+              <clipPath id="volty-ambient-shadow-clip"><rect y="390" width="480" height="90"/></clipPath>
+              <radialGradient id="volty-glitter-feather">
+                <stop offset="0" stop-color="white"/><stop offset=".35" stop-color="white"/><stop offset="1" stop-color="black"/>
+              </radialGradient>
+              <radialGradient id="volty-ambient-glow">
+                <stop offset="0" stop-color="#BFF0D5" stop-opacity=".3"/><stop offset="1" stop-color="#BFF0D5" stop-opacity="0"/>
+              </radialGradient>
+              <mask id="volty-glitter-mask-0" maskUnits="userSpaceOnUse" x="0" y="0" width="480" height="480" style="mask-type: luminance">
+                <rect width="480" height="480" fill="black"/>
+                <circle cx="116" cy="140" r="22" fill="url(#volty-glitter-feather)"/>
+              </mask>
+              <mask id="volty-glitter-mask-1" maskUnits="userSpaceOnUse" x="0" y="0" width="480" height="480" style="mask-type: luminance">
+                <rect width="480" height="480" fill="black"/>
+                <circle cx="90" cy="202" r="13" fill="url(#volty-glitter-feather)"/>
+              </mask>
+              <mask id="volty-glitter-mask-2" maskUnits="userSpaceOnUse" x="0" y="0" width="480" height="480" style="mask-type: luminance">
+                <rect width="480" height="480" fill="black"/>
+                <circle cx="78" cy="267" r="22" fill="url(#volty-glitter-feather)"/>
+              </mask>
+              <mask id="volty-glitter-mask-3" maskUnits="userSpaceOnUse" x="0" y="0" width="480" height="480" style="mask-type: luminance">
+                <rect width="480" height="480" fill="black"/>
+                <circle cx="394" cy="305" r="18" fill="url(#volty-glitter-feather)"/>
+              </mask>
+              <mask id="volty-glitter-mask-4" maskUnits="userSpaceOnUse" x="0" y="0" width="480" height="480" style="mask-type: luminance">
+                <rect width="480" height="480" fill="black"/>
+                <circle cx="374" cy="348" r="23" fill="url(#volty-glitter-feather)"/>
+              </mask>
+            </defs>
+            <g class="volty-ground-shadow">
+              <image href="img/volty_hello.png" width="480" height="480" clip-path="url(#volty-ambient-shadow-clip)"/>
+            </g>
+            <g class="volty-activity-glitter">
+              <ellipse class="volty-ambient-glow" cx="240" cy="252" rx="240" ry="174" fill="url(#volty-ambient-glow)"/>
+              <g class="volty-glitter"><image href="img/volty_hello.png" width="480" height="480" mask="url(#volty-glitter-mask-0)"/></g>
+              <g class="volty-glitter"><image href="img/volty_hello.png" width="480" height="480" mask="url(#volty-glitter-mask-1)"/></g>
+              <g class="volty-glitter"><image href="img/volty_hello.png" width="480" height="480" mask="url(#volty-glitter-mask-2)"/></g>
+              <g class="volty-glitter"><image href="img/volty_hello.png" width="480" height="480" mask="url(#volty-glitter-mask-3)"/></g>
+              <g class="volty-glitter"><image href="img/volty_hello.png" width="480" height="480" mask="url(#volty-glitter-mask-4)"/></g>
+            </g>
+          </svg>
+        </span>
+        <svg viewBox="0 0 480 480" aria-hidden="true" focusable="false">
+          <defs>
+            <!-- Move the original sparkles to the shared animated ambient layer. -->
+            <radialGradient id="volty-glitter-cutout">
+              <stop offset="0" stop-color="black"/><stop offset=".35" stop-color="black"/><stop offset="1" stop-color="white"/>
+            </radialGradient>
+            <!-- Hide the baked-in arm and lights; retain the original face and ring. -->
+            <mask id="volty-still-mask" maskUnits="userSpaceOnUse" x="0" y="0" width="480" height="480" style="mask-type: luminance">
+              <rect width="480" height="480" fill="white"/>
+              <path d="M378 218 C398 202 417 192 430 204 C450 228 425 285 367 308 C375 280 383 247 378 218Z" fill="black"/>
+              <g fill="url(#volty-glitter-cutout)"><circle cx="116" cy="140" r="22"/><circle cx="90" cy="202" r="13"/><circle cx="78" cy="267" r="22"/><circle cx="394" cy="305" r="18"/><circle cx="374" cy="348" r="23"/></g>
+            </mask>
+            <!-- Fixed body silhouette occludes the arm, without dimming it under the baked-in glow. -->
+            <mask id="volty-arm-depth-mask" maskUnits="userSpaceOnUse" x="0" y="0" width="480" height="480" style="mask-type: luminance">
+              <rect width="480" height="480" fill="white"/>
+              <path d="M0 0 H350 V150 C367 169 375 195 378 218 C383 247 375 280 367 308 C351 355 307 380 252 390 H0Z" fill="black"/>
+            </mask>
+            <clipPath id="volty-character-clip"><rect width="480" height="390"/></clipPath>
+          </defs>
+          <g class="volty-float">
+            <g class="volty-approach">
+              <image class="volty-still" href="img/volty_hello.png" width="480" height="480" mask="url(#volty-still-mask)" clip-path="url(#volty-character-clip)"/>
+              <g class="volty-arm-depth" mask="url(#volty-arm-depth-mask)">
+                <g class="volty-wave-arm">
+                  <svg x="354" y="198" width="80" height="110" viewBox="370 385 580 525" preserveAspectRatio="none" overflow="hidden">
+                    <image href="img/volty-parts/volty_arm_wave.png" width="1280" height="1280"/>
+                  </svg>
+                </g>
+              </g>
+            </g>
+          </g>
+        </svg>
+      </button>
+      <div class="hero-say">잠깐 쉬어갈까요?<br>근처에 다녀올 곳을 찾아볼게요!</div>
+      <p class="hand">기다리는 시간이, 좋아지는 경험.</p>
+    </div>
+
+    <div class="battery-summary" id="batterySummary" data-level="unknown" data-charging="unknown">
+      <div class="battery-label">
+        <div class="battery-heading"><span class="battery-title">차량 배터리</span>
+        <span class="battery-status" role="status">
+          <svg class="battery-icon-active" viewBox="0 0 16 16" aria-hidden="true"><path d="m9 1-6 8h4l-1 6 7-9H9z"/></svg>
+          <svg class="battery-icon-idle" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4v8M10 4v8"/></svg>
+          <svg class="battery-icon-unknown" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M8 7v4M8 4.5h.01"/></svg>
+          <span id="batteryStatus">상태 확인 중</span>
+        </span>
+          <span class="battery-caption" id="batteryCaption" hidden></span>
+        </div>
+        <span class="battery-reading"><b id="batteryPct">—</b></span>
+      </div>
+      <div class="battery-case">
+        <div class="battery-track" id="batteryGauge" role="meter" aria-label="차량 배터리 잔량" aria-valuemin="0" aria-valuemax="100" aria-valuetext="아직 확인하지 못했어요">
+          <span class="battery-fill" id="batteryFill"></span>
+          <span class="battery-gloss" aria-hidden="true"></span>
+          <span class="battery-target" id="batteryTarget" style="left: 80%" title="목표 80%" aria-hidden="true"></span>
+        </div>
+      </div>
+      <p class="battery-estimate" id="batteryEstimate" aria-live="polite" hidden>
+        <span id="batteryRemaining"></span>
+        <span id="batteryFinish"></span>
+      </p>
+    </div>
+
+    <div class="ask-row"><h2 class="ask">지금 뭐 할까요?</h2><button class="subtle history-open" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 17l-2 4v-9a9 9 0 1 1 5 8M12 7v5l3 2"/></svg><span>대화 기록</span></button></div>
+    <div class="intents" id="intents">
+      <button type="button" data-text="간단히 밥 먹고 오고 싶어">
+        <i><svg viewBox="0 0 24 24"><path d="M3 11h18a9 9 0 0 1-18 0z"/><path d="M6 5l9 6M12 3l5 8"/></svg></i>밥 먹고 오기</button>
+      <button type="button" data-text="커피 한잔 하고 싶어">
+        <i><svg viewBox="0 0 24 24"><path d="M4 8h12v6a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5z"/><path d="M16 10h2a2 2 0 0 1 0 4h-2M7 3v2M11 3v2"/></svg></i>커피 한잔</button>
+      <button type="button" data-text="편의점에 다녀오고 싶어">
+        <i><svg viewBox="0 0 24 24"><path d="M3 9l2-5h14l2 5M4 9h16v11H4z"/><path d="M9 20v-6h6v6"/></svg></i>편의점 들르기</button>
+      <button type="button" data-text="마트에서 장 보고 싶어">
+        <i><svg viewBox="0 0 24 24"><path d="M5 8h14l-1 12H6z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/></svg></i>장보기</button>
+    </div>
+  </section>
+
+  <!-- 대화 -->
+  <section class="chat" id="chat" hidden>
+    <div class="chat-top">
+      <img class="mini-volty" id="moodImg" src="img/volty_think.png" alt="">
+      <div>
+        <p class="mood" id="moodSay">확인하는 중이에요…</p>
+        <p class="times" id="strip" hidden></p>
+      </div>
+    </div>
+    <div class="chat-actions"><button class="subtle" id="conditionsBtn" type="button">조건 바꾸기</button><button class="subtle" id="preferencesBtn" type="button">내 취향</button><button class="subtle history-open" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 17l-2 4v-9a9 9 0 1 1 5 8M12 7v5l3 2"/></svg><span>대화 기록</span></button></div>
+    <p class="condition-summary" id="conditionSummary" hidden></p>
+    <p class="archive-note" id="archiveNote" hidden>보관된 대화예요. 새 대화에서 다시 추천받을 수 있어요.</p>
+    <section class="station-options" id="stationOptions" aria-label="출발 충전소 선택" hidden></section>
+    <section class="route-map" id="routeMap" aria-labelledby="mapTitle" hidden>
+      <button class="map-back" type="button">← 추천 목록으로</button>
+      <div class="map-heading">
+        <div><h3 id="mapTitle">걸어서 다녀오는 길</h3><p class="map-place"></p></div>
+        <button class="map-fit" type="button" disabled>전체 보기</button>
+      </div>
+      <div class="map-stage">
+        <div class="map-canvas" id="tmapCanvas" role="region" aria-label="충전소와 추천 장소 지도" hidden></div>
+        <div class="map-empty" role="status"><p>장소를 선택하면 지도를 볼 수 있어요.</p><button class="map-retry" type="button" hidden>다시 시도</button></div>
+      </div>
+      <div class="map-controls" role="group" aria-label="표시할 도보 경로">
+        <button type="button" data-direction="both" aria-pressed="true">왕복</button>
+        <button type="button" data-direction="outbound" aria-pressed="false">가는 길</button>
+        <button type="button" data-direction="inbound" aria-pressed="false">오는 길</button>
+      </div>
+      <p class="map-note" aria-live="polite"></p>
+    </section>
+    <div class="messages" id="messages"></div>
+    <div class="follow" id="follow"></div>
+  </section>
+
+  <button class="subtle" id="pendingReview" type="button" hidden>취향 저장 요청 확인</button>
+  <form class="composer" id="composer">
+    <input id="input" type="text" maxlength="500" placeholder="볼티에게 말하기" autocomplete="off">
+    <button id="send" type="submit" aria-label="보내기"><svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button>
+  </form>
+
+  <!-- 승인 : 확정·저장은 사람이 한 번 더 -->
+  <div class="scrim" id="approval" hidden>
+    <div class="sheet">
+      <img class="volty" src="img/volty_clock.png" alt="">
+      <h3 id="apTitle">이 계획으로 확정할까요?</h3>
+      <p id="apBody"></p>
+      <div class="sheet-btns">
+        <button class="primary" id="approve" type="button">네, 확정할게요</button>
+        <button class="quiet" id="reject" type="button">다시 볼래요</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 실행 정보 -->
+  <div class="scrim" id="info" hidden>
+    <div class="sheet">
+      <h3>실행 정보</h3>
+      <div class="info-list" id="infoList"></div>
+      <div class="sheet-btns"><button class="quiet" id="infoClose" type="button">닫기</button></div>
+    </div>
+  </div>
+</div>
+
+<dialog class="car-dialog" id="carDialog" aria-labelledby="carDialogTitle">
+  <div class="sheet">
+    <h3 id="carDialogTitle">차량 충전 상태</h3>
+    <div class="car" id="carStatus">
+      <div class="car-main">
+        <div class="ring" id="ring"><b id="soc">—</b></div>
+        <div class="car-text">
+          <b id="carMain">차량 상태를 확인하는 중…</b>
+          <span id="carSub"></span>
+        </div>
+      </div>
+      <div class="car-times" id="carTimes" hidden>
+        <div><span>충전 완료 예정</span><b id="carFinish">—</b></div>
+      </div>
+    </div>
+    <details class="vehicle-details"><summary>충전 정보 상세</summary><div class="vehicle-meta" id="vehicleMeta"></div></details>
+    <p class="inline-status" id="refreshStatus" role="status"></p>
+    <div class="sheet-btns"><button class="primary" id="refreshCar" type="button">새로고침</button><button class="quiet" id="carClose" type="button" autofocus>닫기</button></div>
+  </div>
+</dialog>
+
+<dialog class="feature-dialog" id="featureDialog" aria-labelledby="featureTitle"><div class="feature-head"><h3 id="featureTitle"></h3><button class="subtle" id="featureClose" type="button" aria-label="닫기">닫기</button></div><div id="featureBody"></div></dialog>
+<div id="notice" class="notice" role="status" hidden></div>
+
+<script src="map-config.js"></script>
+<script src="map.js"></script>
+<script src="home-volty.js"></script>
+<script src="features.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

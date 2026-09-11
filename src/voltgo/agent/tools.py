@@ -399,7 +399,9 @@ def confirm_plan(runtime: ToolRuntime, plan_id: str, version: int) -> dict:
 
     # 같은 요청은 한 번만 (멱등, C017)
     key = f"{plan_id}:{version}"
-    if key in s.confirmed_by_request:
+    # 현재 목적지의 재전송만 멱등 처리한다. A → B → A 선택은 새 변경이므로 재검증한다.
+    if (key in s.confirmed_by_request and s.confirmed is not None
+            and s.confirmed.plan_id == plan_id and s.confirmed.version == version):
         return ToolResult(status="ok", data=s.confirmed_by_request[key], message="이미 확정된 계획").dump()
 
     plan = s.candidates.get(plan_id)

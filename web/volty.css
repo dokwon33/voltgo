@@ -1,0 +1,179 @@
+/* Character, floor shadow and individual lights move on independent rhythms. */
+#homeVolty {
+  position: relative;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  max-width: 100%;
+  aspect-ratio: 1;
+  animation: none;
+  -webkit-tap-highlight-color: transparent;
+}
+#homeVolty > svg { position: relative; z-index: 1; display: block; width: 100%; height: auto; overflow: visible; }
+.volty-ambient { position: absolute; inset: 0; pointer-events: none; }
+.volty-ambient > svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.volty-activity-glitter { pointer-events: none; }
+.volty-glitter {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: volty-glitter-drift 4.6s ease-in-out infinite;
+}
+.volty-glitter:nth-of-type(2) { animation-duration: 5.3s; animation-delay: -1.8s; }
+.volty-glitter:nth-of-type(3) { animation-duration: 4.1s; animation-delay: -3.2s; }
+.volty-glitter:nth-of-type(4) { animation-duration: 5.8s; animation-delay: -.9s; }
+.volty-glitter:nth-of-type(5) { animation-duration: 4.9s; animation-delay: -2.6s; }
+.volty-ambient-glow { animation: volty-glow-breathe 6.4s ease-in-out infinite; }
+@keyframes volty-glitter-drift {
+  0%, 100% { transform: translate(-2px, 3px) scale(.88) rotate(-5deg); opacity: .58; }
+  45% { transform: translate(3px, -6px) scale(1.12) rotate(7deg); opacity: 1; }
+  75% { transform: translate(-1px, -2px) scale(.96) rotate(2deg); opacity: .76; }
+}
+@keyframes volty-glow-breathe {
+  0%, 100% { opacity: .65; }
+  50% { opacity: 1; }
+}
+.volty-float {
+  transform-box: view-box;
+  transform-origin: 240px 245px;
+  animation: volty-float 4.8s ease-in-out infinite;
+}
+.volty-approach {
+  transform-box: view-box;
+  transform-origin: 240px 260px;
+}
+.greet .volty-approach { animation: volty-hello-approach 18s ease-in-out infinite; }
+.volty-ground-shadow {
+  transform-box: view-box;
+  transform-origin: 240px 425px;
+  animation: volty-shadow 4.8s ease-in-out infinite;
+}
+.volty-wave-arm { transform-box: view-box; transform-origin: 366px 290px; }
+.greet .volty-wave-arm { animation: volty-arm-wave 18s ease-in-out infinite; }
+@keyframes volty-float {
+  0%, 100% { transform: translate(-5px, 2px) rotate(-3.5deg); }
+  50% { transform: translate(6px, -18px) rotate(4.5deg); }
+}
+/* A small lean toward the viewer, followed by a slower, soft return. */
+@keyframes volty-hello-approach {
+  0%, 1%, 16%, 100% { transform: translate(0, 0) rotate(0deg) scale(1); }
+  3.5% { transform: translate(0, -4px) rotate(-2deg) scale(1.04); }
+  7% { transform: translate(0, -7px) rotate(3deg) scale(1.085); }
+  10.5% { transform: translate(-1px, -5px) rotate(-1.5deg) scale(1.06); }
+}
+@keyframes volty-shadow {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(.9, .86); opacity: .65; }
+}
+@keyframes volty-arm-wave {
+  0%, 1%, 12%, 100% { transform: rotate(0deg); }
+  4% { transform: rotate(-12deg); }
+  7% { transform: rotate(6deg); }
+  9.5% { transform: rotate(-8deg); }
+}
+/* Sixteen registered poses (4 × 4), with continuous blending into the next
+   pose. Keep the two frame tracks and blend cycle synchronized, including 15 → 0.
+   White backgrounds blend into the shared home surface. */
+#homeVolty.has-activity {
+  --activity-duration: 3.6s;
+  filter: none;
+  isolation: isolate;
+  overflow: hidden;
+  background: var(--bg);
+}
+.volty-activity {
+  position: relative;
+  z-index: 1;
+  mix-blend-mode: multiply;
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  pointer-events: none;
+  transform-origin: 50% 58%;
+  animation: volty-activity-float 5.2s ease-in-out infinite;
+}
+.volty-activity-sprite, .volty-activity-sprite::after {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background-size: 400% 400%;
+  background-repeat: no-repeat;
+  background-position: 0 0;
+}
+.volty-activity-sprite { position: relative; }
+.volty-activity-sprite::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: inherit;
+  opacity: 0;
+}
+.greet .volty-activity-sprite {
+  animation: volty-activity-frames var(--activity-duration) steps(1, end) infinite;
+}
+.greet .volty-activity-sprite::after {
+  animation: volty-activity-next var(--activity-duration) steps(1, end) infinite,
+    volty-frame-blend calc(var(--activity-duration) / 16) linear infinite;
+}
+#homeVolty[data-activity="cafe"] { --activity-duration: 4.8s; }
+#homeVolty[data-activity="convenience"] { --activity-duration: 6.4s; }
+[data-activity="convenience"] .volty-activity { animation: none; }
+#homeVolty[data-activity="mart"] { --activity-duration: 3.2s; }
+[data-activity="mart"] .volty-activity { animation-name: volty-cart-push; }
+@keyframes volty-frame-blend {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes volty-activity-frames {
+  0% { background-position: 0.000000% 0.000000%; }
+  6.25% { background-position: 33.333333% 0.000000%; }
+  12.5% { background-position: 66.666667% 0.000000%; }
+  18.75% { background-position: 100.000000% 0.000000%; }
+  25% { background-position: 0.000000% 33.333333%; }
+  31.25% { background-position: 33.333333% 33.333333%; }
+  37.5% { background-position: 66.666667% 33.333333%; }
+  43.75% { background-position: 100.000000% 33.333333%; }
+  50% { background-position: 0.000000% 66.666667%; }
+  56.25% { background-position: 33.333333% 66.666667%; }
+  62.5% { background-position: 66.666667% 66.666667%; }
+  68.75% { background-position: 100.000000% 66.666667%; }
+  75% { background-position: 0.000000% 100.000000%; }
+  81.25% { background-position: 33.333333% 100.000000%; }
+  87.5% { background-position: 66.666667% 100.000000%; }
+  93.75% { background-position: 100.000000% 100.000000%; }
+  100% { background-position: 0.000000% 0.000000%; }
+}
+@keyframes volty-activity-next {
+  0% { background-position: 33.333333% 0.000000%; }
+  6.25% { background-position: 66.666667% 0.000000%; }
+  12.5% { background-position: 100.000000% 0.000000%; }
+  18.75% { background-position: 0.000000% 33.333333%; }
+  25% { background-position: 33.333333% 33.333333%; }
+  31.25% { background-position: 66.666667% 33.333333%; }
+  37.5% { background-position: 100.000000% 33.333333%; }
+  43.75% { background-position: 0.000000% 66.666667%; }
+  50% { background-position: 33.333333% 66.666667%; }
+  56.25% { background-position: 66.666667% 66.666667%; }
+  62.5% { background-position: 100.000000% 66.666667%; }
+  68.75% { background-position: 0.000000% 100.000000%; }
+  75% { background-position: 33.333333% 100.000000%; }
+  81.25% { background-position: 66.666667% 100.000000%; }
+  87.5% { background-position: 100.000000% 100.000000%; }
+  93.75% { background-position: 0.000000% 0.000000%; }
+  100% { background-position: 33.333333% 0.000000%; }
+}
+@keyframes volty-activity-float {
+  0%, 100% { transform: translate(-1px, 1px) rotate(-1.8deg) scale(1); }
+  45% { transform: translate(2px, -6px) rotate(2deg) scale(1.025); }
+  72% { transform: translate(1px, -3px) rotate(.5deg) scale(1.012); }
+}
+@keyframes volty-cart-push {
+  0%, 100% { transform: translate(-4px, 0) rotate(-.6deg); }
+  50% { transform: translate(4px, -2px) rotate(.6deg); }
+}
+/* The home stage must not keep repainting while chatting or viewing the map. */
+#home[hidden] #homeVolty *, #home[hidden] .volty-activity-sprite::after {
+  animation-play-state: paused;
+}
+@media (prefers-reduced-motion: reduce) {
+  #homeVolty *, #homeVolty .volty-activity-sprite::after { animation: none !important; }
+}
