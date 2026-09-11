@@ -108,7 +108,7 @@
         $('#batteryRemaining').textContent = targetPct === null ? '차량의 목표 충전량을 확인해 주세요' : `${targetPct}%까지 ${duration}`;
         if (targetPct !== null && estimatedFinish !== null && (remaining === null || remaining > 0)) {
           const time = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(estimatedFinish);
-          $('#batteryFinish').textContent = `${time} 예정`;
+          $('#batteryFinish').textContent = `${time} 완료 예정`;
         }
       }
     }
@@ -125,6 +125,10 @@
     $('#batteryCaption').hidden = level !== 'low' && !(level === 'unknown' && charging !== 'unknown');
     $('#batteryPct').textContent = label;
     $('#batteryFill').style.width = (soc ?? 0) + '%';
+    // 앞으로 채워질 구간: 충전 중이고 차량 목표가 현재보다 높을 때만 보여준다
+    const toFill = charging === 'active' && soc !== null && targetPct !== null && targetPct > soc;
+    $('#batteryCharge').hidden = !toFill;
+    if (toFill) { $('#batteryCharge').style.left = soc + '%'; $('#batteryCharge').style.width = (targetPct - soc) + '%'; }
     $('#batteryGauge').setAttribute('aria-valuetext', `${soc === null ? '잔량 미확인' : label} · ${targetPct === null ? '목표 미확인' : `목표 ${targetPct}%`} · ${status} · ${captions[level]}`);
     if (soc === null) $('#batteryGauge').removeAttribute('aria-valuenow');
     else $('#batteryGauge').setAttribute('aria-valuenow', soc);
