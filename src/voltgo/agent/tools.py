@@ -165,6 +165,7 @@ def _set_origin(s, station):
         if s.candidates or s.confirmed:
             s.bump_version()
         s.places, s.routes, s.selected_ran = {}, {}, False
+        s.place_cache = {}
     s.origin = station
     s.station_candidates = {}
 
@@ -224,7 +225,7 @@ def search_nearby_places(runtime: ToolRuntime, category: Category, radius_km: in
     Args:
         category: meal(식사) / cafe / convenience(편의점) / mart
         radius_km: TMAP 검색 반경(km, 정수). 기본 1
-        max_dist_m: 직선거리 필터(m). 비워 두면 자동. 결과가 없을 때만 1회 최대 1000 까지 늘려서 재검색
+        max_dist_m: 직선거리 필터(m). 비워 두면 자동. 결과가 없을 때만 1회 최대 1000 까지 늘려서 재검색 (API 재호출 없음)
         dwell_min: 사용자가 말한 체류 시간(분). 말하지 않았으면 비워 둡니다. select_feasible_plans 에도 같은 값을 넣습니다
     """
     ctx = runtime.context
@@ -254,11 +255,17 @@ def search_nearby_places(runtime: ToolRuntime, category: Category, radius_km: in
     else:
         basis = "지정값"
 
-    try:
-        places = ctx.places_client.search_around(s.origin, category, radius_km=radius_km)
-    except ClientError as e:
-        return tool_error(e.code, str(e), retryable=e.retryable)
-    s.counters["api"] += 1
+    # TMAP 은 radius_km(1km) 로 받아오고 반경은 코드가 거른다 -> 반경만 바꾼 재검색은 받아 둔 목록을 다시 거르면 된다
+    key = (s.origin.latitude, s.origin.longitude, category, radius_km)
+    cached = key in s.place_cache
+    if not cached:
+        try:
+            s.place_cache[key] = ctx.places_client.search_around(s.origin, category, radius_km=radius_km)
+        except ClientError as e:
+            return tool_error(e.code, str(e), retryable=e.retryable)   # 실패는 저장하지 않는다
+        s.counters["api"] += 1
+    places = s.place_cache[key]
+    reuse = ", 이전 검색 결과 재사용" if cached else ""
 
     picked = filter_places(places, s.origin, max_dist_m=max_dist_m, limit=MAX_ROUTE_CANDIDATES)
 
@@ -276,12 +283,16 @@ def search_nearby_places(runtime: ToolRuntime, category: Category, radius_km: in
         s.warnings.append("장소 정보는 Mock 데이터입니다")
 
     if not picked:
+        # 모델이 다음 행동을 고를 수 있게 넓힐 여지가 남았는지 알려 준다
+        if max_dist_m < MAX_DIST_M:
+            hint = f"max_dist_m={MAX_DIST_M} 으로 한 번만 넓혀 보거나(API 추가 호출 없음) 다른 카테고리를 제안하세요."
+        else:
+            hint = f"이미 최대 {MAX_DIST_M}m 까지 봤습니다. 더 넓히지 말고 다른 카테고리를 제안하세요."
         return ToolResult(status="ok", data=[],
-                          message=f"직선거리 {max_dist_m}m({basis}) 안에 없음. 정상 빈 결과. "
-                                  "반경을 한 번만 늘리거나 다른 카테고리를 제안하세요.").dump()
+                          message=f"직선거리 {max_dist_m}m({basis}{reuse}) 안에 없음. 정상 빈 결과. {hint}").dump()
 
     return ToolResult(status="ok", data=picked, source=picked[0].poi_source,
-                      message=f"{len(picked)}곳 (직선거리 {max_dist_m}m 이내 - {basis}, 가까운 순)").dump()
+                      message=f"{len(picked)}곳 (직선거리 {max_dist_m}m 이내 - {basis}{reuse}, 가까운 순)").dump()
 
 
 # ---------------------------------------------------------------

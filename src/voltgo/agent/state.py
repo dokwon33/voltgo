@@ -40,6 +40,8 @@ class Session:
     station_candidates: dict[str, StationCandidate] = field(default_factory=dict)  # poi_id -> 선택 대기 중인 충전소 후보
     time_budget: Optional[TimeBudget] = None
     places: dict[str, Place] = field(default_factory=dict)        # poi_id -> Place
+    # (위도, 경도, 카테고리, radius_km) -> TMAP 이 준 필터 전 목록. 반경만 바꿔 재검색하면 API 를 다시 부르지 않는다
+    place_cache: dict[tuple, list[Place]] = field(default_factory=dict)
     routes: dict[str, RoundTrip] = field(default_factory=dict)    # poi_id -> RoundTrip
     candidates: dict[str, CandidatePlan] = field(default_factory=dict)  # plan_id -> CandidatePlan
     selected_ran: bool = False          # select_feasible_plans 를 한 번이라도 돌렸는지
