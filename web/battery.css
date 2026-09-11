@@ -28,7 +28,7 @@
   background-size: 16px 16px; animation: battery-flow 1.1s linear infinite; }
 @keyframes battery-flow { to { transform: translateX(16px); } }
 .battery-gloss { position: absolute; pointer-events: none; inset: 0; overflow: hidden; }
-.battery-target { position: absolute; top: -4px; bottom: -4px; width: 2px; border-radius: 1px; background: #33473b; transform: translateX(-1px); pointer-events: none; }
+.battery-target { position: absolute; top: -4px; bottom: -4px; width: 2px; border-radius: 1px; background: #a4b0a8; transform: translateX(-1px); pointer-events: none; }
 .battery-estimate { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 3px 12px; margin: 7px 0 0; color: #536d5c; font-size: 12px; line-height: 1.5; }
 .battery-estimate span:first-child { color: #34503f; }
 .battery-estimate span:last-child { color: #6f7d74; }
