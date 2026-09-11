@@ -80,7 +80,7 @@ def main():
             decision = input("approve / reject : ").strip().lower()
             if decision not in ("approve", "reject"):
                 decision = "reject"
-            response = decide(agent, decision, context, thread_id)
+            response = decide(agent, decision, context, thread_id, request_id=response.request_id)
 
         print(f"\n답변 ({response.status}):\n{response.message}")
 

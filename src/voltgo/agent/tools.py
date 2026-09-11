@@ -354,10 +354,10 @@ def confirm_plan(runtime: ToolRuntime, plan_id: str, version: int) -> dict:
     s = ctx.session
     now = ctx.clock()
 
-    # 같은 요청은 한 번만 (멱등, C017)
+    # 같은 계획의 중복 확정 방지. request_id 재전송(C017)은 실행 래퍼에서 처리한다.
     key = f"{plan_id}:{version}"
-    if key in s.confirmed_by_request:
-        return ToolResult(status="ok", data=s.confirmed_by_request[key], message="이미 확정된 계획").dump()
+    if key in s.confirmed_by_plan:
+        return ToolResult(status="ok", data=s.confirmed_by_plan[key], message="이미 확정된 계획").dump()
 
     plan = s.candidates.get(plan_id)
     if plan is None:
@@ -402,7 +402,7 @@ def confirm_plan(runtime: ToolRuntime, plan_id: str, version: int) -> dict:
     confirmed = ConfirmedPlan(plan_id=plan_id, version=version, confirmed_at=now,
                               return_at=rechecked.return_at, leave_by=rechecked.leave_by)
     s.confirmed = confirmed
-    s.confirmed_by_request[key] = confirmed
+    s.confirmed_by_plan[key] = confirmed
     s.approval_requested_at = None      # 다음 승인은 새로 잰다
     s.candidates[plan_id] = rechecked
     return ToolResult(status="ok", data=confirmed, observed_at=now,

@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Optional
 
 from voltgo.agent.schemas import (
-    CandidatePlan, ChargingSnapshot, ConfirmedPlan, Origin, Place, RoundTrip, StationCandidate, TimeBudget,
+    CandidatePlan, ChargingSnapshot, ConfirmedPlan, Origin, Place, RoundTrip, StationCandidate, TimeBudget, VoltGoResponse,
 )
 
 # KST는 UTC+9  (노트북 [4] get_current_time 과 동일)
@@ -19,6 +19,17 @@ KST = timezone(timedelta(hours=9))
 
 def now_kst() -> datetime:
     return datetime.now(KST)
+
+
+@dataclass
+class ApprovalRequest:
+    """발급 당시 승인 대상과 재전송 결과. LLM 입력이나 장기 선호에 저장하지 않는다."""
+    payload: str
+    interrupt_ids: tuple[str, ...]
+    action_count: int
+    requested_at: datetime
+    decision_payload: Optional[str] = None
+    response: Optional[VoltGoResponse] = None
 
 
 @dataclass
@@ -42,9 +53,14 @@ class Session:
 
     # 확정 / 멱등
     confirmed: Optional[ConfirmedPlan] = None
-    confirmed_by_request: dict[str, ConfirmedPlan] = field(default_factory=dict)
+    confirmed_by_plan: dict[str, ConfirmedPlan] = field(default_factory=dict)
     # 승인 요청을 사용자에게 보여준 시각. 후보를 만든 시각(evaluated_at)과 다르다.
     approval_requested_at: Optional[datetime] = None
+
+    # 실행 래퍼가 관리하는 승인 요청. 조건 변경 후에도 완료 응답은 재전송에 사용한다.
+    request_owner: Optional[tuple[str, str]] = None
+    pending_request_id: Optional[str] = None
+    approval_requests: dict[str, ApprovalRequest] = field(default_factory=dict)
 
     # 한도/기록
     counters: dict[str, int] = field(default_factory=lambda: {"model": 0, "tool": 0, "api": 0})
@@ -59,7 +75,7 @@ class Session:
         self.condition_version += 1
         self.candidates = {}
         self.confirmed = None
-        self.confirmed_by_request = {}   # 옛 버전의 확정 기록도 같이 버린다
+        self.confirmed_by_plan = {}   # 옛 버전의 확정 기록도 같이 버린다
         self.approval_requested_at = None
 
 

@@ -163,6 +163,7 @@ class VoltGoResponse(BaseModel):
     status: Literal["ok", "need_input", "no_feasible", "awaiting_approval", "confirmed", "error"]
     message: str = Field(min_length=1, max_length=1000)
     generated_at: datetime
+    request_id: Optional[str] = None          # 승인 배치 ID. decide 재전송 시 그대로 전달
     charging_source: Literal["hyundai", "manual", "mock", "unknown"] = "unknown"
     location_source: Literal["manual", "mock", "unknown"] = "unknown"
     estimate_basis: Literal["reported_remaining", "energy_power", "unknown"] = "unknown"
