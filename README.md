@@ -140,7 +140,9 @@ voltgo/
 │       └── agent.py          #   create_agent 조립, ask() / decide()
 ├── scripts/
 │   ├── demo.py               # CLI 시연 (대화형, 승인 프롬프트 포함)
-│   └── probe_tmap_places.py  # TMAP 장소 API 실호출 확인 (원문은 data/raw/tmap/)
+│   ├── probe_tmap_places.py  # TMAP 장소 API 실호출 확인 (원문은 data/raw/tmap/)
+│   └── web.py                # 웹 화면 서버 (표준 http.server, demo.py 와 같은 ask/decide)
+├── web/                      # 웹 화면 (index.html 하나 + img/ 캐릭터 볼티)
 ├── tests/                    # pytest (계산·선별·어댑터·도구 흐름·출력 조립)
 ├── notebooks/                # 탐색/실험
 ├── docs/                     # 설계서·발표본
@@ -191,6 +193,43 @@ python scripts/demo.py --fixed   # 14:00 고정 시계 (설계서 C001 조건)
 질문: 30분 정도 있는데 간단히 밥 먹고 싶어. 12분이면 먹어.
 질문: 1번으로 확정할게          → 최신 조건으로 재검증 후 확정 또는 재계획
 질문: 카페를 선호해. 다음에도 기억해줘   → [승인 요청] approve / reject
+```
+
+### 웹 화면
+
+```bash
+python scripts/web.py            # http://localhost:8000
+python scripts/web.py --fixed    # 14:00 고정 시계 (설계서 C001 조건)
+```
+
+`scripts/demo.py` 와 같은 `ask()` / `decide()` 를 표준 `http.server` 로 감싼 것이라 추가 설치는 없다. 화면은 `web/index.html`, 캐릭터(볼티) 이미지는 `web/img/`에 있다. 지도 UI는 `web/map.js`·`web/map.css`로 분리했다.
+
+| 화면 | 보여주는 것 |
+| --- | --- |
+| 왼쪽 패널 | SoC·목표 SoC, 충전 완료 예정·복귀 마감·가용 시간, 저장된 선호, 출발 충전소·조건 버전·호출 횟수 |
+| 대화 | 상태(추천 / 확인 필요 / 가능한 후보 없음 / 승인 대기 / 확정 / 오류), 후보 카드(가는 길·체류·오는 길·여유 막대, 복귀·출발 마감, 장소·경로 출처, 영업 미확인) |
+| 선호 저장 승인 | `awaiting_approval` 이면 입력을 잠그고 승인 / 거절 버튼만 보인다 → `POST /api/decide` |
+| 새 대화 | 새 thread_id. 저장 선호가 새 thread 에서 복원되는지(C014) 볼 때 쓴다 |
+
+| API | 내용 |
+| --- | --- |
+| `GET /api/health` | 서버가 익명 브라우저 세션 쿠키를 발급·검증. 현재 사용자 ID와 실행 정보 반환 |
+| `POST /api/session` `{}` | 현재 사용자 소유의 새 대화 ID를 서버에서 발급 |
+| `GET /api/session?thread_id=` | 본인 대화의 Session 요약과 대기 중 승인 복원 |
+| `POST /api/ask` `{thread_id, text}` | `ask()` → `{response: VoltGoResponse, session}` |
+| `POST /api/decide` `{thread_id, approval_id, decision}` | 본인 대화에서 발급한 승인 ID에만 `approve` / `reject` 적용 |
+| `POST /api/charging/refresh` `{thread_id}` | 본인 대화의 충전 상태를 다시 조회 |
+
+지도는 **UI 준비 단계**다. 현재 서버는 `map_data`를 반환하지 않으므로 지도에 실제 보행 경로가 나타나지 않는다. TMAP 브라우저 지도 키도 기본값은 비어 있다. 연결 규격과 남은 작업은 [지도 프론트 연결 계약](docs/map-frontend-contract.md)에 정리했다. 서버 API 키를 프론트에 복사하지 않는다.
+
+웹 서버는 localhost에서 사용하는 단일 프로세스 데모이며 **브라우저 세션별로 선호·대화·승인을 격리**한다. 웹은 `VOLTGO_USER_ID`를 사용하지 않는다. 동일 브라우저의 새 대화에서는 자기 선호를 공유하고, 새로고침하면 서버 소유권 확인 후 자기 기록·승인 화면을 복원한다. 다른 브라우저의 대화·승인 ID는 조회하거나 실행할 수 없다.
+
+익명 세션은 24시간 유지되며 쿠키 삭제·만료 또는 서버 재시작 시 새 사용자로 시작한다. 로그인 계정, 기기 간 사용자 연결, 이전 익명 사용자의 선호 복구는 제공하지 않는다. HTTPS 환경에서는 `VOLTGO_COOKIE_SECURE=true`를 설정한다. 상세 계약과 범위는 [접속자별 격리](docs/user-session-isolation.md)에 정리했다.
+
+브라우저 기록 복원의 별도 회귀 검증은 Node.js가 있는 환경에서 실행한다(추가 npm 패키지 없음).
+
+```bash
+node --test tests/test_web_history.cjs
 ```
 
 ### 실행 모드
