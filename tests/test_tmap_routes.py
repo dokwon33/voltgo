@@ -1,0 +1,167 @@
+# 담당 D - TMAP 보행 경로 어댑터와 부분 실패 처리 (C010, C030)
+import json
+from types import SimpleNamespace
+
+import pytest
+
+from voltgo.agent import tools
+from voltgo.agent.schemas import Place
+from voltgo.clients import ClientError
+from voltgo.clients.tmap_base import TmapHttp
+from voltgo.clients.tmap_routes import TmapRoutesClient
+
+
+class FakeResp:
+    def __init__(self, status_code=200, body=None):
+        self.status_code = status_code
+        self.content = (json.dumps(body) if body is not None else "").encode()
+
+    def json(self):
+        return json.loads(self.content)
+
+
+class FakeSession:
+    """requests.Session 대신 요청을 기록하고 준비한 응답을 순서대로 반환한다."""
+
+    def __init__(self, *responses):
+        self.responses = list(responses)
+        self.calls = []
+
+    def request(self, method, url, params=None, json=None, headers=None, timeout=None):
+        self.calls.append(SimpleNamespace(
+            method=method, url=url, params=params, body=json, headers=headers, timeout=timeout,
+        ))
+        response = self.responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+
+def leg(total_sec=240, total_m=320):
+    return {"features": [{"properties": {"totalTime": total_sec, "totalDistance": total_m}}]}
+
+
+def client_with(*responses):
+    fake = FakeSession(*responses)
+    http = TmapHttp(app_key="test-key", timeout=3.5, session=fake)
+    return TmapRoutesClient(http=http), fake
+
+
+def rt(context):
+    return SimpleNamespace(context=context)
+
+
+def place(pid, name, lat, lon):
+    return Place(
+        poi_id=pid,
+        name=name,
+        category="meal",
+        latitude=lat,
+        longitude=lon,
+        nav_seq="1",
+        distance_m=100,
+        poi_source="tmap",
+    )
+
+
+def test_pedestrian_request_body_and_parse():
+    client, fake = client_with(FakeResp(200, leg("321", "456")))
+
+    result = client.pedestrian(37.5006, 127.0366, 37.502, 127.038, "충전소", "김밥집")
+
+    assert result == (321, 456)
+    assert len(fake.calls) == 1
+    call = fake.calls[0]
+    assert call.method == "POST" and call.url.endswith("/tmap/routes/pedestrian")
+    assert call.params == {"version": 1}
+    assert call.body == {
+        "startX": 127.0366,
+        "startY": 37.5006,
+        "endX": 127.038,
+        "endY": 37.502,
+        "startName": "충전소",
+        "endName": "김밥집",
+        "reqCoordType": "WGS84GEO",
+        "resCoordType": "WGS84GEO",
+        "searchOption": 0,
+    }
+    assert call.headers["appKey"] == "test-key"
+    assert "appKey" not in call.params
+    assert call.timeout == 3.5
+
+
+def test_round_trip_uses_two_separate_reversed_requests(origin):
+    client, fake = client_with(FakeResp(200, leg(240, 300)), FakeResp(200, leg(330, 410)))
+    destination = place("A", "후보A", 37.502, 127.038)
+
+    trip = client.round_trip(origin, destination)
+
+    assert (trip.outbound_sec, trip.outbound_m) == (240, 300)
+    assert (trip.inbound_sec, trip.inbound_m) == (330, 410)
+    assert trip.route_source == "tmap"
+    assert len(fake.calls) == 2
+    outbound, inbound = (call.body for call in fake.calls)
+    assert (outbound["startName"], outbound["endName"]) == (origin.name, destination.name)
+    assert (inbound["startName"], inbound["endName"]) == (destination.name, origin.name)
+    assert (inbound["startX"], inbound["startY"]) == (destination.longitude, destination.latitude)
+    assert (inbound["endX"], inbound["endY"]) == (origin.longitude, origin.latitude)
+
+
+@pytest.mark.parametrize("body", [
+    {"features": [{"properties": {"totalDistance": 100}}]},
+    {"features": [{"properties": {"totalTime": 100}}]},
+    {"features": []},
+])
+def test_missing_route_totals_are_route_parse(body):
+    client, _ = client_with(FakeResp(200, body))
+
+    with pytest.raises(ClientError) as exc_info:
+        client.pedestrian(37.5, 127.0, 37.6, 127.1, "출발", "도착")
+
+    assert (exc_info.value.code, exc_info.value.retryable) == ("ROUTE_PARSE", False)
+
+
+@pytest.mark.parametrize("status_code,code,retryable", [
+    (401, "AUTH_ERROR", False),
+    (403, "AUTH_ERROR", False),
+    (429, "RATE_LIMIT", True),
+    (503, "UPSTREAM", True),
+    (400, "UPSTREAM", False),
+])
+def test_http_error_mapping(status_code, code, retryable):
+    client, fake = client_with(FakeResp(status_code))
+
+    with pytest.raises(ClientError) as exc_info:
+        client.pedestrian(37.5, 127.0, 37.6, 127.1, "출발", "도착")
+
+    assert (exc_info.value.code, exc_info.value.retryable) == (code, retryable)
+    assert len(fake.calls) == 1
+
+
+def test_c010_inbound_failure_drops_only_that_candidate(context, budget):
+    # A: outbound 성공, inbound totalTime 누락. B: 양방향 성공.
+    client, fake = client_with(
+        FakeResp(200, leg(240, 300)),
+        FakeResp(200, {"features": [{"properties": {"totalDistance": 350}}]}),
+        FakeResp(200, leg(300, 380)),
+        FakeResp(200, leg(360, 420)),
+    )
+    context.routes_client = client
+    context.session.places = {
+        "A": place("A", "후보A", 37.502, 127.038),
+        "B": place("B", "후보B", 37.503, 127.039),
+    }
+
+    result = tools.get_walking_routes.func(rt(context), poi_ids=["A", "B"])
+
+    assert result["status"] == "partial"
+    assert [route["poi_id"] for route in result["data"]] == ["B"]
+    assert set(context.session.routes) == {"B"}
+    assert "A" in context.session.warnings[-1]
+    assert len(fake.calls) == 4
+    # A의 outbound 240초를 두 배한 경로가 남아 있지 않는다.
+    assert all(route["poi_id"] != "A" for route in result["data"])
+
+    context.session.time_budget = budget
+    plans = tools.select_feasible_plans.func(rt(context), dwell_min=5)
+    assert [plan["poi_id"] for plan in plans["data"]] == ["B"]

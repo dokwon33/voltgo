@@ -255,7 +255,9 @@ def get_walking_routes(runtime: ToolRuntime, poi_ids: list[str]) -> dict:
     if ctx.routes_client is None:
         return tool_error("AUTH_ERROR", "경로 API 설정이 없습니다")
 
-    poi_ids = poi_ids[:MAX_ROUTE_CANDIDATES]
+    # 같은 ID를 중복 호출하지 않고, 이번 조회 결과만 다음 판정에 사용한다.
+    poi_ids = list(dict.fromkeys(poi_ids))[:MAX_ROUTE_CANDIDATES]
+    s.routes = {}
     ok, failed = [], []
     for pid in poi_ids:
         try:
