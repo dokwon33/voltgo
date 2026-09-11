@@ -166,6 +166,7 @@ def _set_origin(s, station):
         if s.candidates or s.confirmed:
             s.bump_version()
         s.places, s.routes, s.selected_ran = {}, {}, False
+        s.place_cache = {}
     s.origin = station
     s.station_candidates = {}
 
@@ -225,7 +226,7 @@ def search_nearby_places(runtime: ToolRuntime, category: Category, radius_km: in
     Args:
         category: meal(식사) / cafe / convenience(편의점) / mart
         radius_km: TMAP 검색 반경(km, 정수). 기본 1
-        max_dist_m: 직선거리 필터(m). 비워 두면 자동. 결과가 없을 때만 1회 최대 1000 까지 늘려서 재검색
+        max_dist_m: 직선거리 필터(m). 비워 두면 자동. 결과가 없을 때만 1회 최대 1000 까지 늘려서 재검색 (API 재호출 없음)
         dwell_min: 사용자가 말한 체류 시간(분). 말하지 않았으면 비워 둡니다. select_feasible_plans 에도 같은 값을 넣습니다
     """
     ctx = runtime.context
@@ -255,15 +256,25 @@ def search_nearby_places(runtime: ToolRuntime, category: Category, radius_km: in
     else:
         basis = "지정값"
 
-    try:
-        places = ctx.places_client.search_around(s.origin, category, radius_km=radius_km)
-    except ClientError as e:
-        return tool_error(e.code, str(e), retryable=e.retryable)
-    s.counters["api"] += 1
+    # TMAP 은 radius_km(1km) 로 받아오고 반경은 코드가 거른다 -> 반경만 바꾼 재검색은 받아 둔 목록을 다시 거르면 된다
+    key = (s.origin.latitude, s.origin.longitude, category, radius_km)
+    cached = key in s.place_cache
+    if not cached:
+        try:
+            s.place_cache[key] = ctx.places_client.search_around(s.origin, category, radius_km=radius_km)
+        except ClientError as e:
+            return tool_error(e.code, str(e), retryable=e.retryable)   # 실패는 저장하지 않는다
+        s.counters["api"] += 1
+    places = s.place_cache[key]
+    reuse = ", 이전 검색 결과 재사용" if cached else ""
 
     picked = filter_places(places, s.origin, max_dist_m=max_dist_m, limit=MAX_ROUTE_CANDIDATES)
 
-    # 새로 검색하면 이전 경로/후보는 의미가 없다
+    # 정상 빈 결과를 포함한 새 검색은 이전 후보와 확정도 무효화한다.
+    if s.candidates or s.confirmed or s.confirmed_by_plan:
+        s.bump_version()
+    s.confirmed = None
+    s.confirmed_by_plan = {}
     s.places = {p.poi_id: p for p in picked}
     s.routes = {}
     s.candidates = {}
@@ -273,12 +284,16 @@ def search_nearby_places(runtime: ToolRuntime, category: Category, radius_km: in
         s.warnings.append("장소 정보는 Mock 데이터입니다")
 
     if not picked:
+        # 모델이 다음 행동을 고를 수 있게 넓힐 여지가 남았는지 알려 준다
+        if max_dist_m < MAX_DIST_M:
+            hint = f"max_dist_m={MAX_DIST_M} 으로 한 번만 넓혀 보거나(API 추가 호출 없음) 다른 카테고리를 제안하세요."
+        else:
+            hint = f"이미 최대 {MAX_DIST_M}m 까지 봤습니다. 더 넓히지 말고 다른 카테고리를 제안하세요."
         return ToolResult(status="ok", data=[],
-                          message=f"직선거리 {max_dist_m}m({basis}) 안에 없음. 정상 빈 결과. "
-                                  "반경을 한 번만 늘리거나 다른 카테고리를 제안하세요.").dump()
+                          message=f"직선거리 {max_dist_m}m({basis}{reuse}) 안에 없음. 정상 빈 결과. {hint}").dump()
 
     return ToolResult(status="ok", data=picked, source=picked[0].poi_source,
-                      message=f"{len(picked)}곳 (직선거리 {max_dist_m}m 이내 - {basis}, 가까운 순)").dump()
+                      message=f"{len(picked)}곳 (직선거리 {max_dist_m}m 이내 - {basis}{reuse}, 가까운 순)").dump()
 
 
 # ---------------------------------------------------------------
@@ -305,11 +320,11 @@ def get_walking_routes(runtime: ToolRuntime, poi_ids: list[str]) -> dict:
         return tool_error("PRECONDITION_FAILED", "경로를 조회할 poi_id가 없습니다")
 
     # 경로가 갱신되면 이전 경로로 만든 후보와 확정은 더 이상 유효하지 않다.
-    if s.candidates or s.confirmed or s.confirmed_by_request:
+    if s.candidates or s.confirmed or s.confirmed_by_plan:
         s.bump_version()
     s.candidates = {}
     s.confirmed = None
-    s.confirmed_by_request = {}
+    s.confirmed_by_plan = {}
     s.selected_ran = False
 
     # 같은 ID를 중복 호출하지 않고, 이번 조회 결과만 다음 판정에 사용한다.
@@ -375,7 +390,7 @@ def select_feasible_plans(runtime: ToolRuntime, dwell_min: Optional[int] = None,
     if bad:
         return tool_error("PRECONDITION_FAILED", f"잘못된 dwell_overrides: {bad}")
 
-    # 체류 조건이 바뀌면 새 버전 (이전 승인 무효)
+    # 체류 조건이 바뀌면 새 버전 (이전 후보·확정 무효, 선호 승인은 별도)
     if overrides != s.dwell_overrides and (s.candidates or s.confirmed):
         s.bump_version()
     s.dwell_overrides = overrides
@@ -415,10 +430,10 @@ def confirm_plan(runtime: ToolRuntime, plan_id: str, version: int) -> dict:
     s = ctx.session
     now = ctx.clock()
 
-    # 같은 요청은 한 번만 (멱등, C017)
+    # 같은 계획의 중복 확정 방지. 선호 승인 request_id 재전송은 실행 래퍼에서 처리한다.
     key = f"{plan_id}:{version}"
-    if key in s.confirmed_by_request:
-        return ToolResult(status="ok", data=s.confirmed_by_request[key], message="이미 확정된 계획").dump()
+    if key in s.confirmed_by_plan:
+        return ToolResult(status="ok", data=s.confirmed_by_plan[key], message="이미 확정된 계획").dump()
 
     plan = s.candidates.get(plan_id)
     if plan is None:
@@ -449,7 +464,7 @@ def confirm_plan(runtime: ToolRuntime, plan_id: str, version: int) -> dict:
     confirmed = ConfirmedPlan(plan_id=plan_id, version=version, confirmed_at=now,
                               return_at=rechecked.return_at, leave_by=rechecked.leave_by)
     s.confirmed = confirmed
-    s.confirmed_by_request[key] = confirmed
+    s.confirmed_by_plan[key] = confirmed
     s.candidates[plan_id] = rechecked
     return ToolResult(status="ok", data=confirmed, observed_at=now,
                       message=f"확정. 늦어도 {confirmed.leave_by:%H:%M} 에는 장소에서 출발").dump()

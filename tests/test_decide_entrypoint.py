@@ -9,6 +9,7 @@ from voltgo.agent import memory
 from voltgo.agent.agent import ask, build_agent, decide
 from voltgo.agent.approval import pending_approvals
 from voltgo.agent.middleware import MAX_MODEL_CALLS
+from voltgo.agent.requests import config_for
 from tests.test_approval import ScriptedModel, _ai, _tc, _plan_ready
 
 
@@ -27,7 +28,7 @@ def _save(category="cafe", tid="save"):
 
 
 def _config(thread_id):
-    return {"configurable": {"thread_id": thread_id}}
+    return config_for("u1", thread_id)
 
 
 def _tool_results(agent, thread_id, name):
@@ -45,6 +46,7 @@ def test_계획_선택은_추가_승인_없이_재검증_후_확정된다(contex
     agent = _agent([_ai([_tc("confirm_plan", {"plan_id": "A", "version": v}, "t1")]), _done(["A"])])
     r = ask(agent, "A 계획으로 확정해줘", context, "plan")
     assert r.status == "confirmed"
+    assert r.request_id is None
     assert context.session.confirmed.plan_id == "A"
     assert not pending_approvals(agent, _config("plan"))
     assert context.session.approval_requested_at is None

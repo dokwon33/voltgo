@@ -37,7 +37,7 @@ def test_c005_boundary_1500_vs_1501(places, routes, budget, now):
 
 
 def test_c006_recheck_after_5_minutes(places, routes, budget, now):
-    # 14:05 에 승인하면 A 복귀 14:26 > 마감 14:25 -> 확정하지 않는다
+    # 14:05 에 계획을 선택하면 A 복귀 14:26 > 마감 14:25 -> 확정하지 않는다
     plan = select_feasible_plans(places, routes, budget, now, version=1, dwell_overrides={"A": 12})[0]
     assert recheck_plan(plan, budget, now) is not None
     approval_time = now + timedelta(minutes=5)

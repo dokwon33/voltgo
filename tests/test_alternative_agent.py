@@ -8,6 +8,7 @@ from langchain_core.messages import AIMessage, ToolMessage
 
 from voltgo.agent.agent import ask, build_agent
 from voltgo.agent.alternative_agent import assess_time_shortage_alternatives
+from voltgo.agent.requests import config_for
 from voltgo.agent.schemas import Place, RoundTrip
 from voltgo.clients import ClientError
 from tests.test_approval import ScriptedModel, _ai, _tc
@@ -34,7 +35,7 @@ def _shortage_turn(prefix="one", limit=20, dwell=20):
 
 
 def _config(thread_id):
-    return {"configurable": {"thread_id": thread_id}}
+    return config_for("u1", thread_id)
 
 
 def _messages(agent, thread_id):
@@ -59,7 +60,7 @@ def _call_args(agent, thread_id, name):
 
 def test_demo1_same_thread_waits_then_replans_convenience(context):
     script = _shortage_turn() + [
-        _ai([_tc("search_nearby_places", {"category": "convenience"}, "two-search")]),
+        _ai([_tc("search_nearby_places", {"category": "convenience", "dwell_min": 10}, "two-search")]),
         _ai([_tc("get_walking_routes", {"poi_ids": ["E"]}, "two-routes")]),
         _ai([_tc("select_feasible_plans", {"dwell_min": 10}, "two-select")]),
         _decision("choose", "편의점 계획입니다.", ["E"], "two-decision"),
@@ -91,7 +92,7 @@ def test_demo1_same_thread_waits_then_replans_convenience(context):
 
 def test_same_turn_automatic_alternative_search_is_blocked_in_real_graph(context):
     script = _shortage_turn(prefix="early")[:-1] + [
-        _ai([_tc("search_nearby_places", {"category": "convenience"}, "early-search")]),
+        _ai([_tc("search_nearby_places", {"category": "convenience", "dwell_min": 10}, "early-search")]),
         _decision("clarify", "먼저 대체 활동을 선택해 주세요.", tag="early-decision"),
     ]
     agent = build_agent(model=ScriptedModel(script=script))
@@ -106,7 +107,7 @@ def test_same_turn_automatic_alternative_search_is_blocked_in_real_graph(context
 
 def test_exact_ten_minute_demo_replans_but_does_not_invent_feasibility(context):
     script = _shortage_turn(limit=10) + [
-        _ai([_tc("search_nearby_places", {"category": "convenience"}, "ten-search")]),
+        _ai([_tc("search_nearby_places", {"category": "convenience", "dwell_min": 10}, "ten-search")]),
         _ai([_tc("get_walking_routes", {"poi_ids": ["E"]}, "ten-routes")]),
         _ai([_tc("select_feasible_plans", {"dwell_min": 10}, "ten-select")]),
         _ai([_tc("assess_time_shortage_alternatives", {}, "ten-assess")]),
@@ -130,19 +131,20 @@ def test_demo2_rejection_and_ambiguous_reply_call_no_search(context):
         ("아니, 그냥 차에 있을게.", "stop", "reject"),
         ("음...", "clarify", "ambiguous"),
     ]:
+        case_context = deepcopy(context)
         script = _shortage_turn(prefix=thread) + [
             _decision(action, "알겠습니다." if action == "stop" else "어떤 활동을 원하시나요?",
                       tag=f"{thread}-reply"),
         ]
         agent = build_agent(model=ScriptedModel(script=script))
-        ask(agent, "20분 안에 밥 먹을 수 있을까?", context, thread)
-        ask(agent, reply, context, thread)
+        ask(agent, "20분 안에 밥 먹을 수 있을까?", case_context, thread)
+        ask(agent, reply, case_context, thread)
         assert _search_categories(agent, thread) == ["meal"]
 
 
 def test_demo3_explicit_cafe_selection_is_not_changed(context):
     script = _shortage_turn(prefix="cafe") + [
-        _ai([_tc("search_nearby_places", {"category": "cafe", "max_dist_m": 1000}, "cafe-search")]),
+        _ai([_tc("search_nearby_places", {"category": "cafe", "max_dist_m": 1000, "dwell_min": 15}, "cafe-search")]),
         _ai([_tc("get_walking_routes", {"poi_ids": ["D"]}, "cafe-routes")]),
         _ai([_tc("select_feasible_plans", {"dwell_min": 15}, "cafe-select")]),
         _ai([_tc("assess_time_shortage_alternatives", {}, "cafe-assess")]),
@@ -153,6 +155,7 @@ def test_demo3_explicit_cafe_selection_is_not_changed(context):
     ask(agent, "카페로 찾아줘.", context, "cafe-demo")
 
     assert _search_categories(agent, "cafe-demo") == ["meal", "cafe"]
+    assert _call_args(agent, "cafe-demo", "search_nearby_places")[-1]["dwell_min"] == 15
     assert _call_args(agent, "cafe-demo", "select_feasible_plans") == [
         {"dwell_min": 20}, {"dwell_min": 15},
     ]
@@ -161,7 +164,7 @@ def test_demo3_explicit_cafe_selection_is_not_changed(context):
 
 def test_explicit_dwell_is_kept_when_category_changes(context):
     script = _shortage_turn(prefix="explicit", limit=25, dwell=12) + [
-        _ai([_tc("search_nearby_places", {"category": "convenience"}, "explicit-search")]),
+        _ai([_tc("search_nearby_places", {"category": "convenience", "dwell_min": 12}, "explicit-search")]),
         _ai([_tc("get_walking_routes", {"poi_ids": ["E"]}, "explicit-routes")]),
         _ai([_tc("select_feasible_plans", {"dwell_min": 12}, "explicit-select")]),
         _decision("choose", "지정한 체류시간을 반영했습니다.", ["E"], "explicit-decision"),
@@ -180,7 +183,7 @@ def test_user_limit_is_not_reused_as_cafe_dwell(context):
     script = [
         _ai([_tc("get_charging_status", {}, "limit-charging")]),
         _ai([_tc("calculate_time_budget", {"user_limit_min": 20}, "limit-budget")]),
-        _ai([_tc("search_nearby_places", {"category": "cafe", "max_dist_m": 1000}, "limit-cafe")]),
+        _ai([_tc("search_nearby_places", {"category": "cafe", "max_dist_m": 1000, "dwell_min": 15}, "limit-cafe")]),
         _ai([_tc("get_walking_routes", {"poi_ids": ["D"]}, "limit-routes")]),
         _ai([_tc("select_feasible_plans", {"dwell_min": 15}, "limit-select")]),
         _ai([_tc("assess_time_shortage_alternatives", {}, "limit-assess")]),
@@ -197,7 +200,7 @@ def test_explicit_convenience_dwell_overrides_default(context):
     script = [
         _ai([_tc("get_charging_status", {}, "store-charging")]),
         _ai([_tc("calculate_time_budget", {"user_limit_min": 20}, "store-budget")]),
-        _ai([_tc("search_nearby_places", {"category": "convenience"}, "store-search")]),
+        _ai([_tc("search_nearby_places", {"category": "convenience", "dwell_min": 12}, "store-search")]),
         _ai([_tc("get_walking_routes", {"poi_ids": ["E"]}, "store-routes")]),
         _ai([_tc("select_feasible_plans", {"dwell_min": 12}, "store-select")]),
         _ai([_tc("assess_time_shortage_alternatives", {}, "store-assess")]),
@@ -229,7 +232,10 @@ def test_demo4_original_meal_is_feasible_and_assessment_is_not_called(context):
 
 
 def test_demo5_other_thread_has_no_alternative_context(context):
+    context_a = deepcopy(context)
+    context_b = deepcopy(context)
     script = _shortage_turn(prefix="thread-a") + [
+        _ai([_tc("get_charging_status", {}, "thread-b-charging")]),
         _ai([_tc("calculate_time_budget", {"user_limit_min": 40}, "thread-b-budget")]),
         _ai([_tc("search_nearby_places", {"category": "meal"}, "thread-b-meal")]),
         _ai([_tc("get_walking_routes", {"poi_ids": ["A", "B", "C"]}, "thread-b-routes")]),
@@ -237,8 +243,8 @@ def test_demo5_other_thread_has_no_alternative_context(context):
         _decision("choose", "식사 계획입니다.", ["A"], "thread-b-decision"),
     ]
     agent = build_agent(model=ScriptedModel(script=script))
-    ask(agent, "20분 안에 밥 먹고 싶어.", context, "thread-a")
-    response = ask(agent, "40분 동안 밥 먹고 싶어.", context, "thread-b")
+    ask(agent, "20분 안에 밥 먹고 싶어.", context_a, "thread-a")
+    response = ask(agent, "40분 동안 밥 먹고 싶어.", context_b, "thread-b")
 
     assert response.status == "ok"
     assert _search_categories(agent, "thread-b") == ["meal"]
@@ -266,6 +272,8 @@ def test_demo6_route_api_error_keeps_existing_error_flow(context):
 
 
 def test_no_place_and_partial_route_are_not_time_shortage(context):
+    no_place_context = deepcopy(context)
+    partial_context = deepcopy(context)
     no_place_script = [
         _ai([_tc("get_charging_status", {}, "none-charging")]),
         _ai([_tc("calculate_time_budget", {"user_limit_min": 20}, "none-budget")]),
@@ -273,7 +281,7 @@ def test_no_place_and_partial_route_are_not_time_shortage(context):
         _decision("stop", "주변 마트를 찾지 못했습니다.", tag="none-decision"),
     ]
     agent = build_agent(model=ScriptedModel(script=no_place_script))
-    ask(agent, "마트 찾아줘.", context, "no-place")
+    ask(agent, "마트 찾아줘.", no_place_context, "no-place")
     assert _results(agent, "no-place", "assess_time_shortage_alternatives") == []
 
     class PartialRoutes:
@@ -283,7 +291,7 @@ def test_no_place_and_partial_route_are_not_time_shortage(context):
             return RoundTrip(poi_id=place.poi_id, outbound_sec=600, inbound_sec=600,
                              route_source="mock")
 
-    context.routes_client = PartialRoutes()
+    partial_context.routes_client = PartialRoutes()
     partial_script = [
         _ai([_tc("search_nearby_places", {"category": "meal"}, "partial-meal")]),
         _ai([_tc("get_walking_routes", {"poi_ids": ["A", "B", "C"]}, "partial-routes")]),
@@ -292,12 +300,14 @@ def test_no_place_and_partial_route_are_not_time_shortage(context):
         _decision("stop", "일부 경로를 평가하지 못했습니다.", tag="partial-decision"),
     ]
     partial_agent = build_agent(model=ScriptedModel(script=partial_script))
-    ask(partial_agent, "밥 먹고 싶어.", context, "partial")
+    ask(partial_agent, "밥 먹고 싶어.", partial_context, "partial")
     assessment = _results(partial_agent, "partial", "assess_time_shortage_alternatives")[0]
     assert assessment["data"]["reason"] == "not_time_shortage"
 
 
 def test_new_time_and_new_category_take_priority(context):
+    time_context = deepcopy(context)
+    category_context = deepcopy(context)
     time_script = _shortage_turn(prefix="time") + [
         _ai([_tc("calculate_time_budget", {"user_limit_min": 40}, "new-budget")]),
         _ai([_tc("search_nearby_places", {"category": "meal"}, "new-meal")]),
@@ -306,18 +316,18 @@ def test_new_time_and_new_category_take_priority(context):
         _decision("choose", "새 시간으로 다시 계산했습니다.", ["A"], "new-decision"),
     ]
     agent = build_agent(model=ScriptedModel(script=time_script))
-    ask(agent, "20분 안에 밥 먹고 싶어.", context, "new-time")
-    response = ask(agent, "생각보다 40분 남았어. 그래도 밥 먹을래.", context, "new-time")
+    ask(agent, "20분 안에 밥 먹고 싶어.", time_context, "new-time")
+    response = ask(agent, "생각보다 40분 남았어. 그래도 밥 먹을래.", time_context, "new-time")
     assert response.status == "ok"
     assert _search_categories(agent, "new-time") == ["meal", "meal"]
 
     category_script = _shortage_turn(prefix="new-category") + [
-        _ai([_tc("search_nearby_places", {"category": "cafe"}, "new-cafe")]),
+        _ai([_tc("search_nearby_places", {"category": "cafe", "dwell_min": 15}, "new-cafe")]),
         _decision("stop", "카페 결과입니다.", tag="new-category-decision"),
     ]
     category_agent = build_agent(model=ScriptedModel(script=category_script))
-    ask(category_agent, "20분 안에 밥 먹고 싶어.", context, "new-category")
-    ask(category_agent, "아니, 그냥 카페 찾아줘.", context, "new-category")
+    ask(category_agent, "20분 안에 밥 먹고 싶어.", category_context, "new-category")
+    ask(category_agent, "아니, 그냥 카페 찾아줘.", category_context, "new-category")
     assert _search_categories(category_agent, "new-category") == ["meal", "cafe"]
 
 
@@ -341,7 +351,7 @@ def test_new_mart_request_uses_mart_default_without_old_alternative(context):
     context.places_client = MartPlaces()
     context.routes_client = MartRoutes()
     script = _shortage_turn(prefix="mart") + [
-        _ai([_tc("search_nearby_places", {"category": "mart"}, "mart-search")]),
+        _ai([_tc("search_nearby_places", {"category": "mart", "dwell_min": 25}, "mart-search")]),
         _ai([_tc("get_walking_routes", {"poi_ids": ["M"]}, "mart-routes")]),
         _ai([_tc("select_feasible_plans", {"dwell_min": 25}, "mart-select")]),
         _ai([_tc("assess_time_shortage_alternatives", {}, "mart-assess")]),
@@ -359,7 +369,7 @@ def test_new_mart_request_uses_mart_default_without_old_alternative(context):
 
 def test_alternative_plan_can_be_confirmed_on_third_turn(context):
     script = _shortage_turn(prefix="confirm") + [
-        _ai([_tc("search_nearby_places", {"category": "convenience"}, "confirm-search")]),
+        _ai([_tc("search_nearby_places", {"category": "convenience", "dwell_min": 10}, "confirm-search")]),
         _ai([_tc("get_walking_routes", {"poi_ids": ["E"]}, "confirm-routes")]),
         _ai([_tc("select_feasible_plans", {"dwell_min": 10}, "confirm-select")]),
         _decision("choose", "편의점 계획입니다.", ["E"], "confirm-choice"),
