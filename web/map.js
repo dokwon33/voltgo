@@ -11,15 +11,30 @@
       const script = document.createElement('script');
       script.src = 'https://apis.openapi.sk.com/tmap/jsv2?version=1&appKey=' + encodeURIComponent(key);
       script.async = true;
+      const connectionError = () => finish(new Error('지도 연결이 원활하지 않아요. 다시 시도해 주세요.'));
+      // TMAP 로더(jsv2)는 SDK 본체를 document.write 로 붙인다. 페이지가 뜬 뒤 넣은 스크립트의
+      // document.write 는 브라우저가 무시하므로, 쓰려던 <script src> 를 직접 붙인다.
+      // 본체는 appKey 를 이 로더 <script> 의 src 에서 읽으므로 로더 태그는 남겨 둔다.
+      const write = document.write;
+      const restoreWrite = () => { if (document.write !== write) document.write = write; };
+      document.write = (html) => {
+        const src = /<script[^>]*\ssrc=['"]([^'"]+)['"]/i.exec(String(html))?.[1];
+        if (!src) return;
+        const body = document.createElement('script');
+        body.src = src;
+        body.onerror = connectionError;
+        document.head.append(body);
+      };
       const finish = (error) => {
-        clearInterval(poll); clearTimeout(timeout);
-        script.onerror = null;
+        clearInterval(poll); clearTimeout(timeout); restoreWrite();
+        script.onload = script.onerror = null;
         if (error) { script.remove(); reject(error); }
         else resolve(window.Tmapv2);
       };
       const poll = setInterval(() => { if (window.Tmapv2?.Map) finish(); }, 100);
       const timeout = setTimeout(() => finish(new Error('지도를 불러오지 못했어요. 다시 시도해 주세요.')), 15000);
-      script.onerror = () => finish(new Error('지도 연결이 원활하지 않아요. 다시 시도해 주세요.'));
+      script.onload = restoreWrite;   // 로더는 한 번 실행되면 끝이다. 다른 코드의 document.write 는 건드리지 않는다
+      script.onerror = connectionError;
       document.head.append(script);
     }).catch((error) => { sdkPromise = null; throw error; });
     return sdkPromise;
@@ -51,7 +66,7 @@
       this.canvas = panel.querySelector('.map-canvas');
       this.resizeObserver = new ResizeObserver(() => {
         if (this.map && !this.panel.hidden && !this.canvas.hidden) {
-          this.map.resize('100%', '100%');
+          this.fitSize();
           this.fit();
         }
       });
@@ -170,7 +185,7 @@
             this.panel.querySelector('.map-tile-status').hidden = !text;
           };
         }
-        this.map.resize('100%', '100%');
+        this.fitSize();
         this.panel.querySelector('.map-empty').hidden = true;
         this.panel.querySelector('.map-fit').disabled = false;
         this.panel.querySelector('.map-fit').hidden = false;
@@ -218,6 +233,13 @@
         this.clearOverlays();
         this.message(error.message || '지도를 불러오지 못했어요.', true);
       }
+    }
+
+    // TMAP Map.resize 는 px 숫자만 받는다. '100%' 를 주면 "100%px" 가 되어 지도 틀이 0x0 으로 잘린다.
+    // 아직 화면에 안 보여 크기가 0이면 건너뛴다. 보이는 순간 ResizeObserver 가 다시 맞춘다.
+    fitSize() {
+      const { clientWidth: width, clientHeight: height } = this.canvas;
+      if (width && height) this.map.resize(width, height);
     }
 
     fit() {
