@@ -213,14 +213,24 @@ python scripts/web.py --fixed    # 14:00 고정 시계 (설계서 C001 조건)
 
 | API | 내용 |
 | --- | --- |
-| `GET /api/health` | 충전·TMAP Mock/실연동 여부, 시계 모드, 모델명 |
-| `GET /api/session?thread_id=` | Session 요약 (SoC, 출발지, 시간 예산, 저장 선호, 호출 횟수) |
+| `GET /api/health` | 서버가 익명 브라우저 세션 쿠키를 발급·검증. 현재 사용자 ID와 실행 정보 반환 |
+| `POST /api/session` `{}` | 현재 사용자 소유의 새 대화 ID를 서버에서 발급 |
+| `GET /api/session?thread_id=` | 본인 대화의 Session 요약과 대기 중 승인 복원 |
 | `POST /api/ask` `{thread_id, text}` | `ask()` → `{response: VoltGoResponse, session}` |
-| `POST /api/decide` `{thread_id, decision}` | `decide()` — `approve` / `reject` |
+| `POST /api/decide` `{thread_id, approval_id, decision}` | 본인 대화에서 발급한 승인 ID에만 `approve` / `reject` 적용 |
+| `POST /api/charging/refresh` `{thread_id}` | 본인 대화의 충전 상태를 다시 조회 |
 
 지도는 **UI 준비 단계**다. 현재 서버는 `map_data`를 반환하지 않으므로 지도에 실제 보행 경로가 나타나지 않는다. TMAP 브라우저 지도 키도 기본값은 비어 있다. 연결 규격과 남은 작업은 [지도 프론트 연결 계약](docs/map-frontend-contract.md)에 정리했다. 서버 API 키를 프론트에 복사하지 않는다.
 
-웹 서버는 localhost에서 사용하는 단일 사용자 시연용이다. 페이지 새로고침·새 대화는 새 thread를 만들며, 저장한 선호는 같은 사용자에게 유지된다. 승인 대기 중에는 선호 저장 승인·거절을 먼저 처리한다.
+웹 서버는 localhost에서 사용하는 단일 프로세스 데모이며 **브라우저 세션별로 선호·대화·승인을 격리**한다. 웹은 `VOLTGO_USER_ID`를 사용하지 않는다. 동일 브라우저의 새 대화에서는 자기 선호를 공유하고, 새로고침하면 서버 소유권 확인 후 자기 기록·승인 화면을 복원한다. 다른 브라우저의 대화·승인 ID는 조회하거나 실행할 수 없다.
+
+익명 세션은 24시간 유지되며 쿠키 삭제·만료 또는 서버 재시작 시 새 사용자로 시작한다. 로그인 계정, 기기 간 사용자 연결, 이전 익명 사용자의 선호 복구는 제공하지 않는다. HTTPS 환경에서는 `VOLTGO_COOKIE_SECURE=true`를 설정한다. 상세 계약과 범위는 [접속자별 격리](docs/user-session-isolation.md)에 정리했다.
+
+브라우저 기록 복원의 별도 회귀 검증은 Node.js가 있는 환경에서 실행한다(추가 npm 패키지 없음).
+
+```bash
+node --test tests/test_web_history.cjs
+```
 
 ### 실행 모드
 

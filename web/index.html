@@ -200,6 +200,7 @@
         <div><span>차로 돌아올 시간</span><b id="carDeadline">—</b></div>
       </div>
       <p class="car-note" id="carNote" hidden></p>
+      <button type="button" id="refreshCar">차량 상태 새로고침</button>
     </div>
 
     <h2 class="ask">지금 뭐 할까요?</h2>
@@ -273,6 +274,7 @@
 </div>
 
 <script src="map-config.js"></script>
+<script src="session.js"></script>
 <script src="map.js"></script>
 <script>
   const IMG = { hello: 'img/volty_hello.png', think: 'img/volty_think.png', point: 'img/volty_point.png',
@@ -299,13 +301,36 @@
   const hhmm = (iso) => iso ? iso.slice(11, 16) : '—';
   const min = (sec) => Math.floor((sec || 0) / 60);
 
-  let threadId = '', busy = false, health = {}, session = {}, lastRes = null;
+  let threadId = '', busy = true, health = {}, session = {}, lastRes = null;
+  let history = null, entries = [], pendingApprovalId = null;
+
+  function clearVisitorView() {
+    history = null; entries = []; threadId = ''; session = {}; lastRes = null; pendingApprovalId = null;
+    $('#messages').innerHTML = ''; $('#follow').innerHTML = ''; $('#infoList').innerHTML = '';
+    $('#approval').hidden = true; $('#info').hidden = true;
+    routeMap.reset(); renderCar({}); renderStrip({}, null);
+  }
 
   async function api(path, body) {
-    const opt = body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : undefined;
+    const opt = body ? { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+                     : { credentials: 'same-origin', cache: 'no-store' };
     const r = await fetch(path, opt);
     const data = await r.json().catch(() => ({ error: '서버 응답을 읽지 못했어요' }));
-    if (!r.ok || data.error) throw new Error(data.error || ('HTTP ' + r.status));
+    if (data.session && data.session.user_id !== health.user_id) {
+      clearVisitorView();
+      const error = new Error('접속 세션이 바뀌었습니다. 새로고침해 주세요.');
+      error.status = 401;
+      throw error;
+    }
+    if (!r.ok || data.error) {
+      const error = new Error(data.error || ('HTTP ' + r.status));
+      error.status = r.status;
+      if (r.status === 401) {
+        // 쿠키가 바뀐 뒤 이전 사용자의 화면·기록을 다음 사용자에게 재사용하지 않는다.
+        clearVisitorView();
+      }
+      throw error;
+    }
     return data;
   }
 
@@ -384,7 +409,7 @@
       </article>`;
   }
 
-  function addBot(res, mapData) {
+  function addBot(res, mapData, restoring = false) {
     const cands = res.candidates || [];
     const mapKeys = routeMap.register(res, mapData);
     const mood = MOOD[res.status] ? res.status : 'busy';
@@ -410,7 +435,7 @@
     else routeMap.hide();
     setMood(mood);
     renderFollow(res);
-    if (res.status === 'awaiting_approval') openApproval(res);
+    if (res.status === 'awaiting_approval' && !restoring) openApproval(res);
     scrollDown();
   }
 
@@ -444,12 +469,13 @@
 
   function setLock() {
     const awaiting = !$('#approval').hidden;
-    $('#input').disabled = busy || awaiting;
-    $('#send').disabled = busy || awaiting;
+    $('#input').disabled = busy || awaiting || !threadId;
+    $('#send').disabled = busy || awaiting || !threadId;
     $('#input').placeholder = awaiting ? '위에서 먼저 결정해 주세요' : '볼티에게 말하기';
-    document.querySelectorAll('#follow button, #intents button, button.pick').forEach((b) => (b.disabled = busy || awaiting));
+    document.querySelectorAll('#follow button, #intents button, button.pick').forEach((b) => (b.disabled = busy || awaiting || !threadId));
     $('#approve').disabled = busy; $('#reject').disabled = busy;
     $('#homeBtn').disabled = busy;
+    $('#refreshCar').disabled = busy || !threadId;
   }
 
   // ---------- 실행 정보 ----------
@@ -460,6 +486,7 @@
       ['장소·경로', health.tmap === 'tmap' ? 'TMAP 실연동' : 'Mock'],
       ['시계', health.clock === 'fixed' ? '2026-09-10 14:00 고정' : '실제 시각'],
       ['모델', health.model || '—'],
+      ['접속', '이 브라우저의 익명 세션'],
       ['기억한 취향', p ? [CAT[p.preferred_category], p.dwell_min ? `체류 ${p.dwell_min}분` : ''].filter(Boolean).join(' · ') : '없음'],
       ['조건 버전', session.condition_version ? 'v' + session.condition_version + (session.confirmed ? ' · 확정 ' + session.confirmed.plan_id : '') : '—'],
       ['호출 (모델 / 도구 / API)', `${k.model ?? 0} / ${k.tool ?? 0} / ${k.api ?? 0}`],
@@ -473,40 +500,73 @@
 
   async function send(text) {
     text = (text || '').trim();
-    if (!text || busy || !$('#approval').hidden) return;
+    if (!text || busy || !threadId || !$('#approval').hidden) return;
     showChat(); addMe(text); $('#input').value = '';
     busy = true; setLock(); setMood('busy'); addTyping();
     try {
       const d = await api('/api/ask', { thread_id: threadId, text });
-      session = d.session; lastRes = d.response;
+      session = d.session; lastRes = d.response; pendingApprovalId = d.approval_id;
+      entries.push({ me: text }, { response: d.response, map_data: d.map_data }); history.save(threadId, entries);
       removeTyping(); renderStrip(session, d.response); addBot(d.response, d.map_data);
     } catch (e) { removeTyping(); addError(e.message); }
     finally { busy = false; setLock(); }
   }
 
   async function decideNow(decision) {
-    if (busy || $('#approval').hidden) return;
+    if (busy || $('#approval').hidden || !pendingApprovalId) return;
     $('#approval').hidden = true;
     addMe(decision === 'approve' ? $('#approve').textContent : $('#reject').textContent);
     busy = true; setLock(); setMood('busy'); addTyping();
     try {
-      const d = await api('/api/decide', { thread_id: threadId, decision });
-      session = d.session; lastRes = d.response;
+      const d = await api('/api/decide', { thread_id: threadId, decision, approval_id: pendingApprovalId });
+      session = d.session; lastRes = d.response; pendingApprovalId = d.approval_id;
+      entries.push({ me: decision === 'approve' ? '네, 기억해줘' : '저장하지 않을게요' }, { response: d.response });
+      history.save(threadId, entries);
       removeTyping(); renderStrip(session, d.response); addBot(d.response, d.map_data);
-    } catch (e) { removeTyping(); addError(e.message); $('#approval').hidden = false; }
+    } catch (e) { removeTyping(); addError(e.message); $('#approval').hidden = [401, 404, 409].includes(e.status); }
     finally { busy = false; setLock(); }
   }
 
-  function goHome() {
+  async function goHome() {
     if (busy) return;
     routeMap.reset();
-    threadId = 'web-' + Math.random().toString(36).slice(2, 8);
-    session = {}; lastRes = null;
+    threadId = ''; session = {}; lastRes = null; entries = []; pendingApprovalId = null;
     $('#messages').innerHTML = ''; $('#follow').innerHTML = ''; $('#strip').hidden = true;
     $('#approval').hidden = true; $('#chat').hidden = true; $('#home').hidden = false; $('#homeBtn').hidden = true;
-    busy = false; setLock();
-    api('/api/session?thread_id=' + threadId).then((d) => { session = d.session; renderCar(session); })
-      .catch(() => { $('#carMain').textContent = '서버가 꺼져 있어요'; $('#carSub').textContent = '터미널에서 python scripts/web.py 를 켜고 새로고침해 주세요'; $('#carTimes').hidden = true; });
+    busy = true; setLock();
+    try {
+      health = await api('/api/health');
+      history = new VoltGoHistory(health.user_id);
+      const d = await api('/api/session', {});
+      threadId = d.thread_id; session = d.session; history.save(threadId, entries); renderCar(session);
+    } catch (e) { $('#carMain').textContent = e.message; $('#carTimes').hidden = true; }
+    finally { busy = false; setLock(); }
+  }
+
+  async function start() {
+    setLock();
+    try {
+      health = await api('/api/health');
+      history = new VoltGoHistory(health.user_id);
+      const saved = history.load();
+      if (saved) {
+        try {
+          // 소유권을 확인하기 전에는 브라우저에 남은 대화를 표시하지 않는다.
+          const d = await api('/api/session?thread_id=' + encodeURIComponent(saved.thread_id));
+          threadId = d.thread_id; session = d.session; entries = saved.entries;
+          if (entries.length) showChat();
+          for (const entry of entries) {
+            if (typeof entry.me === 'string') addMe(entry.me);
+            else if (entry.response) { lastRes = entry.response; addBot(entry.response, entry.map_data, true); }
+          }
+          $('#approval').hidden = true; pendingApprovalId = d.approval_id;
+          if (d.pending_response) openApproval(d.pending_response);
+          renderCar(session); renderStrip(session, lastRes);
+          busy = false; setLock(); return;
+        } catch (e) { if (![401, 404].includes(e.status)) throw e; }
+      }
+      busy = false; await goHome();
+    } catch (e) { $('#carMain').textContent = e.message; busy = false; setLock(); }
   }
 
   $('#composer').addEventListener('submit', (e) => { e.preventDefault(); send($('#input').value); });
@@ -519,6 +579,16 @@
   $('#approve').addEventListener('click', () => decideNow('approve'));
   $('#reject').addEventListener('click', () => decideNow('reject'));
   $('#homeBtn').addEventListener('click', goHome);
+  $('#refreshCar').addEventListener('click', async () => {
+    if (busy || !threadId) return;
+    busy = true; setLock();
+    try {
+      const d = await api('/api/charging/refresh', { thread_id: threadId });
+      session = d.session; renderCar(session);
+      if (d.result.status === 'error') $('#carMain').textContent = d.result.message;
+    } catch (e) { $('#carMain').textContent = e.message; }
+    finally { busy = false; setLock(); }
+  });
   $('#homeVolty').addEventListener('click', (e) => {          // 누르면 다시 인사
     e.target.classList.remove('greet'); void e.target.offsetWidth; e.target.classList.add('greet');
   });
@@ -526,8 +596,7 @@
   $('#infoClose').addEventListener('click', () => { $('#info').hidden = true; });
   $('#info').addEventListener('click', (e) => { if (e.target === $('#info')) $('#info').hidden = true; });
 
-  api('/api/health').then((h) => { health = h; }).catch(() => {});
-  goHome();
+  start();
 </script>
 </body>
 </html>

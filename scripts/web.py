@@ -7,18 +7,22 @@ VoltGo 웹 화면 (scripts/demo.py 의 브라우저 판)
 
 외부 패키지 없이 표준 http.server 로 띄운다. 에이전트 호출은 demo.py 와 같은 ask() / decide().
   GET  /                 web/index.html
-  GET  /api/health       실행 모드 (충전 Mock/실연동, TMAP Mock/실연동, 시계)
-  GET  /api/session      ?thread_id=  -> 왼쪽 패널용 Session 요약 (SoC, 출발지, 저장 선호 ...)
+  GET  /api/health       익명 접속 세션 발급·검증 + 현재 접속자의 실행 정보
+  POST /api/session      {} -> 서버 발급 thread_id + Session 요약
+  GET  /api/session      ?thread_id= -> 본인 대화의 상태·승인 복원
   POST /api/ask          {thread_id, text}      -> {response: VoltGoResponse, session}
-  POST /api/decide       {thread_id, decision}  -> {response, session}   (approve / reject)
+  POST /api/decide       {thread_id, approval_id, decision} -> {response, session}
+  POST /api/charging/refresh {thread_id} -> 본인 대화의 충전 상태 갱신
 """
 import json
 import os
+import secrets
 import sys
 import threading
 import webbrowser
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import parse_qs, urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -28,20 +32,28 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from demo import make_context                       # demo.py 와 같은 Context 조립 (.env 도 여기서 읽는다)
 from voltgo.agent import memory
 from voltgo.agent.agent import ask, build_agent, decide
-from voltgo.agent.approval import pending_approvals
 from voltgo.clients import ClientError
 from voltgo.core.time_budget import calculate_time_budget
+from voltgo.agent.tools import get_charging_status
+from voltgo.web_sessions import BrowserSessions
 
 WEB_DIR = ROOT / "web"
 FIXED = "--fixed" in sys.argv
-USER_ID = os.getenv("VOLTGO_USER_ID", "user_001")
+COOKIE_SECURE = os.getenv("VOLTGO_COOKIE_SECURE", "false").lower() == "true"
 
 agent = None                   # 첫 질문 때 만든다. 키가 없어도 홈 화면(차량 상태)은 뜨게
-contexts = {}                  # thread_id -> Context. thread 마다 Session 이 따로 있다
+visitors = BrowserSessions()
+contexts = {}                  # (서버가 발급한 user_id, thread_id) -> Context
+owners = {}                    # 서버가 발급한 thread_id -> user_id
+approvals = {}                 # (user_id, thread_id) -> 현재 승인 ID·소비 여부·응답
 lock = threading.Lock()        # 에이전트는 한 번에 한 요청만 처리
 
 
 class MissingModelKey(RuntimeError):
+    pass
+
+
+class ConversationNotFound(Exception):
     pass
 
 
@@ -54,20 +66,49 @@ def get_agent():
     return agent
 
 
-def context_for(thread_id: str):
-    if thread_id not in contexts:
-        contexts[thread_id] = make_context(USER_ID, fixed_clock=FIXED)
-    return contexts[thread_id]
+def new_conversation(user_id: str):
+    thread_id = "web-" + secrets.token_hex(16)
+    context = make_context(user_id, fixed_clock=FIXED)
+    contexts[user_id, thread_id] = context
+    owners[thread_id] = user_id
+    return thread_id, context
 
 
-def health():
+def context_for(user_id: str, thread_id: str):
+    # 존재하지 않는 대화와 다른 사용자의 대화는 같은 404로 처리한다.
+    if owners.get(thread_id) != user_id:
+        raise ConversationNotFound("대화를 찾을 수 없습니다")
+    return contexts[user_id, thread_id]
+
+
+def checkpoint_id(user_id: str, thread_id: str):
+    # 서버 내부 checkpoint도 사용자·대화 조합으로 구분한다.
+    return json.dumps(["web", user_id, thread_id], separators=(",", ":"))
+
+
+def remember_approval(context, thread_id, response):
+    key = context.user_id, thread_id
+    if response.status == "awaiting_approval":
+        approvals[key] = {
+            "approval_id": secrets.token_urlsafe(32),
+            "response": response.model_dump(mode="json"),
+            "native_request_id": getattr(response, "request_id", None),
+            "consumed": False,
+        }
+    else:
+        approvals.pop(key, None)
+    return approvals.get(key, {}).get("approval_id")
+
+
+def health(user_id):
     return {
         "ok": True,
         "model": os.getenv("MODEL_NAME", "gpt-4.1-mini"),
         "charging": "mock" if os.getenv("USE_MOCK_CHARGING", "true").lower() == "true" else "hyundai",
         "tmap": "tmap" if os.getenv("TMAP_APP_KEY") else "mock",
         "clock": "fixed" if FIXED else "real",
-        "user_id": USER_ID,
+        "user_id": user_id,
+        "identity": "anonymous_browser_session",
     }
 
 
@@ -117,18 +158,35 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         url = urlparse(self.path)
+        if url.path.startswith("/api/") and not self._same_origin():
+            return self._json({"error": "같은 사이트에서 요청해 주세요"}, 403)
         if url.path == "/api/health":
-            return self._json(health())
+            visitor = visitors.resolve(self.headers.get("Cookie", ""))
+            cookie = None
+            if visitor is None:
+                visitor, cookie = visitors.issue(secure=COOKIE_SECURE)
+            return self._json(health(visitor.user_id), cookie=cookie)
         if url.path == "/api/session":
-            thread_id = (parse_qs(url.query).get("thread_id") or ["web"])[0]
+            visitor = self._visitor()
+            if visitor is None:
+                return
+            thread_id = (parse_qs(url.query).get("thread_id") or [None])[0]
             if not self._valid_thread(thread_id):
                 return self._json({"error": "thread_id는 1~128자 문자열이어야 합니다"}, 400)
             try:
                 with lock:
-                    summary = session_summary(context_for(thread_id))
-                return self._json({"session": summary})
+                    context = context_for(visitor.user_id, thread_id)
+                    pending = approvals.get((visitor.user_id, thread_id), {})
+                    payload = {"thread_id": thread_id, "session": session_summary(context),
+                               "approval_id": pending.get("approval_id") if not pending.get("consumed") else None,
+                               "pending_response": pending.get("response") if not pending.get("consumed") else None}
+                return self._json(payload)
+            except ConversationNotFound:
+                return self._json({"error": "대화를 찾을 수 없습니다"}, 404)
             except Exception:
                 return self._json({"error": "세션 상태를 불러오지 못했습니다"}, 500)
+        if url.path.startswith("/api/"):
+            return self._json({"error": "없는 경로입니다"}, 404)
         if url.path == "/":
             self.path = "/index.html"
         return super().do_GET()
@@ -137,10 +195,35 @@ class Handler(SimpleHTTPRequestHandler):
     def _valid_thread(value):
         return isinstance(value, str) and 1 <= len(value.strip()) <= 128
 
+    def _same_origin(self):
+        if self.headers.get("Sec-Fetch-Site") == "cross-site":
+            return False
+        origin = self.headers.get("Origin")
+        if origin is None:
+            return True
+        try:
+            parsed = urlparse(origin)
+        except ValueError:
+            return False
+        return (parsed.scheme == ("https" if COOKIE_SECURE else "http")
+                and parsed.netloc.lower() == self.headers.get("Host", "").lower()
+                and not parsed.path and not parsed.query and not parsed.fragment)
+
+    def _visitor(self):
+        visitor = visitors.resolve(self.headers.get("Cookie", ""))
+        if visitor is None:
+            self._json({"error": "접속 세션이 만료되었습니다. 새로고침해 주세요.",
+                        "code": "SESSION_EXPIRED"}, 401)
+        return visitor
+
     def do_POST(self):
         path = urlparse(self.path).path
-        if path not in ("/api/ask", "/api/decide"):
+        if path not in ("/api/session", "/api/ask", "/api/decide", "/api/charging/refresh"):
             return self._json({"error": "없는 경로입니다"}, 404)
+        if not self._same_origin():
+            return self._json({"error": "같은 사이트에서 요청해 주세요"}, 403)
+        if self.headers.get_content_type() != "application/json":
+            return self._json({"error": "application/json 요청이 필요합니다"}, 415)
         try:
             length = int(self.headers.get("Content-Length") or 0)
         except ValueError:
@@ -153,8 +236,12 @@ class Handler(SimpleHTTPRequestHandler):
             return self._json({"error": "올바른 JSON으로 요청해 주세요"}, 400)
         if not isinstance(body, dict):
             return self._json({"error": "JSON 객체가 필요합니다"}, 400)
-        thread_id = body.get("thread_id", "web")
-        if not self._valid_thread(thread_id):
+        if "user_id" in body:
+            return self._json({"error": "사용자는 서버 접속 세션으로 결정됩니다"}, 400)
+        thread_id = body.get("thread_id")
+        if path == "/api/session" and thread_id is not None:
+            return self._json({"error": "새 대화 ID는 서버가 발급합니다"}, 400)
+        if path != "/api/session" and not self._valid_thread(thread_id):
             return self._json({"error": "thread_id는 1~128자 문자열이어야 합니다"}, 400)
         text = body.get("text", "")
         if path == "/api/ask" and (not isinstance(text, str) or not text.strip()):
@@ -162,18 +249,45 @@ class Handler(SimpleHTTPRequestHandler):
         decision = body.get("decision")
         if path == "/api/decide" and decision not in ("approve", "reject"):
             return self._json({"error": "approve 또는 reject를 선택해 주세요"}, 400)
+        if path == "/api/decide" and (not self._valid_thread(body.get("approval_id"))
+                                      or not body["approval_id"].isascii()):
+            return self._json({"error": "현재 승인 화면의 approval_id가 필요합니다"}, 400)
+
+        visitor = self._visitor()
+        if visitor is None:
+            return
 
         try:
             with lock:
-                context = context_for(thread_id)
-                current_agent = get_agent()
+                if path == "/api/session":
+                    thread_id, context = new_conversation(visitor.user_id)
+                    return self._json({"thread_id": thread_id, "session": session_summary(context)}, 201)
+                context = context_for(visitor.user_id, thread_id)
+                key = visitor.user_id, thread_id
+                if path == "/api/charging/refresh":
+                    result = get_charging_status.func(SimpleNamespace(context=context), force_refresh=True)
+                    return self._json({"result": result, "session": session_summary(context)})
                 if path == "/api/ask":
-                    if pending_approvals(current_agent, {"configurable": {"thread_id": thread_id}}):
+                    if key in approvals:
                         return self._json({"error": "대기 중인 선호 저장을 먼저 승인하거나 거절해 주세요"}, 409)
-                    res = ask(current_agent, text, context, thread_id)
+                    current_agent = get_agent()
+                    res = ask(current_agent, text, context, checkpoint_id(*key))
                 else:
-                    res = decide(current_agent, decision, context, thread_id)
-                payload = {"response": res.model_dump(mode="json"), "session": session_summary(context)}
+                    pending = approvals.get(key)
+                    if pending is None or not secrets.compare_digest(pending["approval_id"], body["approval_id"]):
+                        return self._json({"error": "승인 요청을 찾을 수 없습니다"}, 404)
+                    if pending["consumed"]:
+                        return self._json({"error": "이미 처리한 승인 요청입니다. 새 대화에서 다시 요청해 주세요"}, 409)
+                    current_agent = get_agent()
+                    # 실패·동시 재전송에서도 동일한 승인 ID를 두 번 실행하지 않는다.
+                    pending["consumed"] = True
+                    request_args = {"request_id": pending["native_request_id"]} if pending["native_request_id"] else {}
+                    res = decide(current_agent, decision, context, checkpoint_id(*key), **request_args)
+                approval_id = remember_approval(context, thread_id, res)
+                payload = {"response": res.model_dump(mode="json"), "session": session_summary(context),
+                           "thread_id": thread_id, "approval_id": approval_id}
+        except ConversationNotFound:
+            return self._json({"error": "대화를 찾을 수 없습니다"}, 404)
         except MissingModelKey as e:
             return self._json({"error": str(e)}, 503)
         except ClientError as e:
@@ -183,11 +297,16 @@ class Handler(SimpleHTTPRequestHandler):
             return self._json({"error": "요청을 처리하지 못했습니다. 서버 설정과 연결을 확인해 주세요."}, 500)
         self._json(payload)
 
-    def _json(self, data, status=200):
+    def _json(self, data, status=200, *, cookie=None):
         raw = json.dumps(data, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(raw)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Vary", "Cookie")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        if cookie is not None:
+            self.send_header("Set-Cookie", cookie)
         self.end_headers()
         self.wfile.write(raw)
 
@@ -208,7 +327,7 @@ def main():
     else:
         sys.exit(f"{port}~{port + 9} 번 포트가 모두 사용 중입니다. --port 로 지정하세요.")
     url = f"http://localhost:{p}"
-    print(f"* VoltGo web : {url}   user={USER_ID} clock={'14:00 고정' if FIXED else '실제 시각'}")
+    print(f"* VoltGo web : {url}   브라우저별 익명 세션 / clock={'14:00 고정' if FIXED else '실제 시각'}")
     webbrowser.open(url)
     server.serve_forever()
 
