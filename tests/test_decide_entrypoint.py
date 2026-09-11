@@ -11,7 +11,7 @@ from voltgo.agent import memory, tools
 from voltgo.agent.agent import ask, build_agent, decide
 from voltgo.agent.middleware import MAX_MODEL_CALLS
 
-from test_approval import ScriptedModel, _ai, _tc
+from tests.test_approval import ScriptedModel, _ai, _tc
 
 
 def _rt(context):
